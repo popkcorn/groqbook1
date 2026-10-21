@@ -140,19 +140,50 @@ def _retry_after_seconds(headers, message: str) -> float | None:
 
 
 class GroqProvider:
-    def __init__(self, api_key: str, *, base_url: str | None = None, timeout: float = 120.0):
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str | None = None,
+        timeout: float = 120.0,
+        architect_model: str | None = None,
+        writer_model: str | None = None,
+        editor_model: str | None = None,
+    ):
         if not api_key:
             raise LLMError("no API key supplied")
         self._api_key = api_key
         self._base_url = (base_url or config.GROQ_BASE_URL).rstrip("/")
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=15.0))
         self.name = "groq"
-        self.architect_model = config.ARCHITECT_MODEL
-        self.writer_model = config.WRITER_MODEL
-        self.editor_model = config.EDITOR_MODEL
+        self.architect_model = architect_model or config.ARCHITECT_MODEL
+        self.writer_model = writer_model or config.WRITER_MODEL
+        self.editor_model = editor_model or config.EDITOR_MODEL
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    async def list_models(self) -> list[dict]:
+        """Return the models this Groq key can currently access."""
+        response = await self._client.get(f"{self._base_url}/models", headers=self._headers)
+        if response.status_code >= 400:
+            raise self._error_from(response.status_code, response.content, response.headers)
+        try:
+            records = response.json().get("data", [])
+        except (ValueError, AttributeError) as exc:
+            raise LLMError("Groq returned an invalid model list") from exc
+        models = []
+        for record in records:
+            if not isinstance(record, dict) or not record.get("id"):
+                continue
+            models.append({
+                "id": str(record["id"]),
+                "owned_by": record.get("owned_by"),
+                "context_window": record.get("context_window"),
+                "max_completion_tokens": record.get("max_completion_tokens"),
+                "active": record.get("active"),
+            })
+        return models
 
     # -- low level ---------------------------------------------------------- #
     @property

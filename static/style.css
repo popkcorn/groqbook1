@@ -619,3 +619,10 @@ textarea:focus, select:focus, input:focus {
 }
 .guide-profile { margin: .28rem 0 0; color: var(--muted); font-size: .65rem; line-height: 1.4; }
 .guide-profile strong { color: var(--ink-soft); font-weight: 650; }
+
+/* -------------------------------------------------------------- Groq models */
+.model-load { margin-top: .15rem; font-size: .72rem; }
+.model-panel .model-field { margin: .8rem 0; }
+.model-panel .model-field .label { margin-bottom: .3rem; }
+.model-panel .model-field select { font-size: .76rem; }
+.model-panel .model-field .hint { line-height: 1.4; }

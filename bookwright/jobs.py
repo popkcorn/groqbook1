@@ -133,6 +133,7 @@ class Job:
     id: str
     spec: BookSpec
     provider_name: str
+    models: dict[str, str] = field(default_factory=dict)
     status: str = "queued"  # queued|planning|writing|done|partial|error|cancelled
     plan: Plan | None = None
     chapters: dict[int, dict] = field(default_factory=dict)
@@ -209,6 +210,7 @@ class Job:
         return {
             "id": self.id,
             "mode": self.provider_name,
+            "models": dict(self.models),
             "status": self.status,
             "spec": self.spec.to_dict(),
             "plan": self.plan.to_dict() if self.plan else None,
@@ -392,7 +394,15 @@ class JobStore:
         self.capacity = capacity
 
     def create(self, spec: BookSpec, provider: Provider) -> Job:
-        job = Job(id=uuid.uuid4().hex[:12], spec=spec, provider_name=provider.name)
+        job = Job(
+            id=uuid.uuid4().hex[:12],
+            spec=spec,
+            provider_name=provider.name,
+            models={
+                role: str(getattr(provider, f"{role}_model", ""))
+                for role in ("architect", "writer", "editor")
+            },
+        )
         job.chapters = {}
         self._jobs[job.id] = job
         self._order.append(job.id)

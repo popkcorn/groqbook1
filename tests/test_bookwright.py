@@ -261,6 +261,198 @@ def test_groq_429_uses_retry_after_header_and_body_hint(monkeypatch):
     assert delays == [23.955]
 
 
+def test_groq_model_catalog_and_per_role_selection(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import server
+    from bookwright.jobs import JobStore
+
+    available_models = [
+        {
+            "id": "groq/architect-model",
+            "owned_by": "Groq",
+            "context_window": 131072,
+            "max_completion_tokens": 8192,
+            "active": True,
+        },
+        {
+            "id": "groq/writer-model",
+            "owned_by": "Groq",
+            "context_window": 32768,
+            "max_completion_tokens": 4096,
+            "active": True,
+        },
+    ]
+    key = {"value": None}
+    store = JobStore()
+    monkeypatch.setattr(server, "store", store)
+    monkeypatch.setattr(server, "_client_key", lambda request, body_key=None: key["value"])
+
+    class FakeProvider:
+        name = "groq"
+
+        def __init__(self, api_key, **selected):
+            assert api_key == "gsk_test"
+            self.architect_model = selected.get("architect_model") or "groq/architect-model"
+            self.writer_model = selected.get("writer_model") or "groq/writer-model"
+            self.editor_model = selected.get("editor_model") or "groq/writer-model"
+
+        async def list_models(self):
+            return available_models
+
+        async def aclose(self):
+            return None
+
+    async def skip_generation(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(server, "GroqProvider", FakeProvider)
+    monkeypatch.setattr(server, "run_book", skip_generation)
+    client = TestClient(server.app)
+
+    assert client.get("/api/models").status_code == 409
+    key["value"] = "gsk_test"
+    catalog = client.get("/api/models")
+    assert catalog.status_code == 200
+    assert catalog.json()["models"] == available_models
+
+    response = client.post(
+        "/api/books",
+        json={
+            "topic": "A book about careful model selection",
+            "review_outline": False,
+            "architect_model": "groq/architect-model",
+            "writer_model": "groq/writer-model",
+            "editor_model": "groq/writer-model",
+        },
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["models"] == {
+        "architect": "groq/architect-model",
+        "writer": "groq/writer-model",
+        "editor": "groq/writer-model",
+    }
+    assert store.get(response.json()["id"]).models == response.json()["models"]
+
+
+def test_groq_provider_maps_model_metadata():
+    provider = object.__new__(GroqProvider)
+
+    class Response:
+        def __init__(self):
+            self.status_code = 200
+            self.content = b"{}"
+            self.headers = {}
+
+        def json(self):
+            return {
+                "data": [
+                    {
+                        "id": "groq/example-model",
+                        "owned_by": "Groq",
+                        "context_window": 65536,
+                        "max_completion_tokens": 4096,
+                        "active": True,
+                    },
+                    {"id": "groq/without-details"},
+                    {"owned_by": "no-id"},
+                ]
+            }
+
+    class FakeClient:
+        async def get(self, url, *, headers):
+            assert url == "https://api.groq.com/openai/v1/models"
+            assert headers["Authorization"] == "Bearer gsk_test"
+            return Response()
+
+    provider._base_url = "https://api.groq.com/openai/v1"
+    provider._api_key = "gsk_test"
+    provider._client = FakeClient()
+    models = asyncio.run(provider.list_models())
+    assert models == [
+        {
+            "id": "groq/example-model",
+            "owned_by": "Groq",
+            "context_window": 65536,
+            "max_completion_tokens": 4096,
+            "active": True,
+        },
+        {
+            "id": "groq/without-details",
+            "owned_by": None,
+            "context_window": None,
+            "max_completion_tokens": None,
+            "active": None,
+        },
+    ]
+
+
+def test_models_api_and_book_request_use_role_specific_models(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import server
+    from bookwright.jobs import JobStore
+
+    catalog = [{
+        "id": "groq/text-model",
+        "owned_by": "Groq",
+        "context_window": 65536,
+        "max_completion_tokens": 4096,
+        "active": True,
+    }]
+    key = {"value": None}
+    store = JobStore()
+    monkeypatch.setattr(server, "store", store)
+    monkeypatch.setattr(server, "_client_key", lambda request, body_key=None: key["value"])
+
+    class FakeProvider:
+        name = "groq"
+
+        def __init__(self, api_key, **models):
+            assert api_key == "gsk_test"
+            self.architect_model = models.get("architect_model") or "groq/default-architect"
+            self.writer_model = models.get("writer_model") or "groq/default-writer"
+            self.editor_model = models.get("editor_model") or "groq/default-editor"
+
+        async def list_models(self):
+            return catalog
+
+        async def aclose(self):
+            return None
+
+    async def skip_generation(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(server, "GroqProvider", FakeProvider)
+    monkeypatch.setattr(server, "run_book", skip_generation)
+    client = TestClient(server.app)
+    assert client.get("/api/models").status_code == 409
+
+    key["value"] = "gsk_test"
+    catalog_response = client.get("/api/models")
+    assert catalog_response.status_code == 200
+    assert catalog_response.json()["models"] == catalog
+
+    response = client.post(
+        "/api/books",
+        json={
+            "topic": "A book about model choice",
+            "review_outline": False,
+            "architect_model": "groq/plan-large",
+            "writer_model": "groq/write-fast",
+            "editor_model": "groq/edit-small",
+        },
+    )
+    assert response.status_code == 202, response.text
+    expected = {
+        "architect": "groq/plan-large",
+        "writer": "groq/write-fast",
+        "editor": "groq/edit-small",
+    }
+    assert response.json()["models"] == expected
+    assert store.get(response.json()["id"]).models == expected
+
+
 def test_chapter_regeneration_prompt_is_targeted():
     job = _run()
     chapter = job.plan.chapter(2)

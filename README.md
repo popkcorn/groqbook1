@@ -48,6 +48,20 @@ in **waves** of `CONCURRENCY` so that each wave can fold its summaries into the 
 next wave starts. That is deliberate: full parallelism would be faster and incoherent. A retry or a
 cancellation never loses what was already written.
 
+### Choosing Groq models
+
+Expand **Groq models** in the app and load the catalog with your API key. You can select an
+Architect model (plans the argument and outline), Writer model (drafts every chapter), and Editor
+model (summaries plus the optional style pass) independently. The catalog is fetched from Groq for
+your account and shows the owner, context window, maximum completion tokens, and active status when
+Groq provides them. Model selection changes capability, prose style, speed, and token consumption;
+larger context/output limits do not guarantee better writing and may use more TPM. Choices are saved
+as model IDs with the book; the API key is request-scoped and is never stored in the job. With no key,
+the app uses fixed demo prose and model selection is disabled.
+
+The API accepts `architect_model`, `writer_model`, and `editor_model` in `POST /api/books`; omit them
+to use the `.env` defaults above. `GET /api/models` returns the live account catalog.
+
 ---
 
 ## Run it on your own PC
@@ -388,6 +402,7 @@ main.py          the original Groqbook app, unchanged, for reference
 |---|---|---|
 | `GET` | `/api/health` | Mode (`live`/`demo`) and the routed model IDs |
 | `GET` | `/api/presets` | Lengths, tones, audiences, limits |
+| `GET` | `/api/models` | Models available to the request's Groq key, with owner and token limits |
 | `POST` | `/api/books` | Start a book; returns `id` + token estimate |
 | `GET` | `/api/books/{id}` | Full snapshot (plan, chapters, stats) |
 | `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `stylist_start`, `stylist_done`, `stylist_rejected`, `chapter_reverted`, `chapter_regenerated`, `chapter_regeneration_undone`, `chapter_drafted`, `chapter_done`, `outline_review`, `done`, `error` |

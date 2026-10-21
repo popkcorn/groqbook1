@@ -88,6 +88,31 @@
         </label>
       </details>
 
+      <details class="style-panel model-panel" id="model-panel">
+        <summary>
+          <span>Groq models</span>
+          <span class="style-count" id="model-count">server defaults</span>
+        </summary>
+        <p class="hint panel-hint">Choose different Groq models for planning, chapter writing, and editing. Model choice can change capability, writing style, speed, context size, and token use. The list and metadata are fetched from Groq using your key; the key is not saved in the book job.</p>
+        <button class="ghost model-load" id="model-load" type="button">Load models from Groq</button>
+        <p class="hint" id="model-list-status">Add a Groq API key to browse models. Demo mode uses fixed sample prose.</p>
+        <label class="field model-field">
+          <span class="label">Architect · outline and argument</span>
+          <select id="architect-model"></select>
+          <span class="hint" id="architect-model-info"></span>
+        </label>
+        <label class="field model-field">
+          <span class="label">Writer · chapter prose</span>
+          <select id="writer-model"></select>
+          <span class="hint" id="writer-model-info"></span>
+        </label>
+        <label class="field model-field">
+          <span class="label">Editor · summaries and style pass</span>
+          <select id="editor-model"></select>
+          <span class="hint" id="editor-model-info"></span>
+        </label>
+      </details>
+
       <details class="style-panel" id="style-panel">
         <summary>
           <span>Style controls</span>

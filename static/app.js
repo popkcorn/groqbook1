@@ -27,6 +27,8 @@
     stream: null,
     follow: true,
     startedAt: 0,
+    modelDefaults: {},
+    modelCatalog: [],
   };
 
   const L = {
@@ -165,6 +167,8 @@
       state.mode = state.key ? "live" : health.mode;
       setMode(state.mode, health.models);
       fillForm(presets);
+      setupModelSelectors(health.models);
+      if (state.mode === "live") loadGroqModels({ silent: true });
     } catch (err) {
       toast(`Could not reach the server: ${err.message}`);
     }
@@ -180,6 +184,116 @@
           ? `Groq · ${models.architect} + ${models.writer}`
           : "Groq API"
         : "Demo mode: a local fixture provider writes placeholder prose. Add a key for real text.";
+    updateModelAvailability();
+  }
+
+  const MODEL_ROLES = ["architect", "writer", "editor"];
+
+  function setupModelSelectors(defaults) {
+    state.modelDefaults = defaults || {};
+    MODEL_ROLES.forEach((role) => {
+      const select = $(`#${role}-model`);
+      const defaultModel = state.modelDefaults[role] || "";
+      select.replaceChildren(new Option(defaultModel || "Load Groq models", defaultModel));
+      select.addEventListener("change", () => paintModelDetails(role));
+      paintModelDetails(role);
+    });
+    $("#model-load").addEventListener("click", () => {
+      if (state.mode !== "live") {
+        openKey();
+        return;
+      }
+      loadGroqModels();
+    });
+    updateModelAvailability();
+  }
+
+  function updateModelAvailability() {
+    const live = state.mode === "live";
+    const loaded = state.modelCatalog.length > 0;
+    MODEL_ROLES.forEach((role) => {
+      const select = $(`#${role}-model`);
+      if (select) select.disabled = !live || !loaded;
+    });
+    const loadButton = $("#model-load");
+    if (loadButton) loadButton.textContent = loaded ? "Refresh Groq model list" : "Load models from Groq";
+    const count = $("#model-count");
+    if (count) count.textContent = loaded ? `${state.modelCatalog.length} available` : live ? "not loaded" : "Groq only";
+    const status = $("#model-list-status");
+    if (status) {
+      status.textContent = loaded
+        ? "Catalog loaded from Groq for this key. Select a role to see its limits and owner."
+        : live
+          ? "Load the models available to your Groq account."
+          : "Add a Groq API key to browse models. Demo mode uses fixed sample prose.";
+    }
+  }
+
+  function paintModelDetails(role) {
+    const select = $(`#${role}-model`);
+    const info = $(`#${role}-model-info`);
+    if (!select || !info) return;
+    const id = select.value;
+    const model = state.modelCatalog.find((item) => item.id === id);
+    if (!model) {
+      info.textContent = id
+        ? `${id} · configured default${state.modelCatalog.length ? "; not in the current account catalog" : ""}.`
+        : "Add a key and load the model catalog.";
+      return;
+    }
+    const details = [];
+    if (model.owned_by) details.push(`Provider: ${model.owned_by}`);
+    if (Number.isFinite(model.context_window)) details.push(`Context: ${nf.format(model.context_window)} tokens`);
+    if (Number.isFinite(model.max_completion_tokens)) details.push(`Max output: ${nf.format(model.max_completion_tokens)} tokens`);
+    if (model.active === false) details.push("Inactive in Groq");
+    info.textContent = details.join(" · ") || "Listed by Groq; model limits are not exposed in the catalog.";
+  }
+
+  async function loadGroqModels({ silent = false } = {}) {
+    const button = $("#model-load");
+    if (button) button.disabled = true;
+    try {
+      const response = await api("/api/models");
+      state.modelCatalog = (response.models || []).filter((item) => item.id);
+      MODEL_ROLES.forEach((role) => {
+        const select = $(`#${role}-model`);
+        const current = select.value || state.modelDefaults[role] || "";
+        const options = state.modelCatalog.map((model) => {
+          const label = model.active === false ? `${model.id} · inactive` : model.id;
+          const option = new Option(label, model.id);
+          option.disabled = model.active === false;
+          return option;
+        });
+        if (current && !state.modelCatalog.some((model) => model.id === current)) {
+          options.unshift(new Option(`${current} · configured default`, current));
+        }
+        select.replaceChildren(...options);
+        select.value = current;
+        paintModelDetails(role);
+      });
+      updateModelAvailability();
+      if (!silent) toast(`${state.modelCatalog.length} models loaded from Groq.`);
+    } catch (err) {
+      updateModelAvailability();
+      if (silent) {
+        $("#model-list-status").textContent = `Could not load Groq models: ${err.message}. You can retry below.`;
+      } else {
+        toast(err.message, 9000);
+      }
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  function resetModelSelectors() {
+    state.modelCatalog = [];
+    MODEL_ROLES.forEach((role) => {
+      const select = $(`#${role}-model`);
+      const defaultModel = state.modelDefaults[role] || "";
+      select.replaceChildren(new Option(defaultModel || "Groq model", defaultModel));
+      paintModelDetails(role);
+    });
+    updateModelAvailability();
   }
 
   function fillForm(presets) {
@@ -491,6 +605,11 @@
     payload.voice_sample = $("#voice-sample").value.trim();
     payload.pov = $("#pov").value || "auto";
     payload.review_outline = $("#review-outline").checked;
+    if (state.mode === "live") {
+      payload.architect_model = $("#architect-model").value || null;
+      payload.writer_model = $("#writer-model").value || null;
+      payload.editor_model = $("#editor-model").value || null;
+    }
     return payload;
   }
 
@@ -1399,6 +1518,8 @@
     state.mode = value ? "live" : "demo";
     setMode(state.mode);
     if (state.presets) updateEstimate(state.presets);
+    if (value) loadGroqModels({ silent: true });
+    else resetModelSelectors();
     toast(value ? "Key set for this tab. Next book will use Groq." : "Key cleared — back to demo mode.");
   });
   $("#key-clear").addEventListener("click", () => {
@@ -1408,6 +1529,7 @@
     state.mode = "demo";
     setMode("demo");
     if (state.presets) updateEstimate(state.presets);
+    resetModelSelectors();
     closeKey();
   });
   document.addEventListener("keydown", (e) => {

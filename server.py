@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 from bookwright import config, prompts
 from bookwright.exporters import ExportOptions, export
 from bookwright.jobs import BookSpec, JobStore, estimate, run_book
-from bookwright.llm import GroqProvider
+from bookwright.llm import GroqProvider, LLMError
 from bookwright.mock import MockProvider
 from bookwright.schema import PlanError, parse_plan
 
@@ -63,6 +63,9 @@ class BookRequest(BaseModel):
     voice_sample: str = Field(default="", max_length=config.MAX_VOICE_SAMPLE_CHARS)
     pov: str = config.DEFAULT_POV
     review_outline: bool = config.DEFAULT_REVIEW_OUTLINE
+    architect_model: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+    writer_model: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+    editor_model: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
     @field_validator("topic")
     @classmethod
@@ -182,9 +185,9 @@ def _client_key(request: Request, body_key: str | None = None) -> str:
     return header or (body_key or "").strip() or os.environ.get("GROQ_API_KEY", "").strip()
 
 
-def _provider(api_key: str):
+def _provider(api_key: str, **models):
     if api_key:
-        return GroqProvider(api_key)
+        return GroqProvider(api_key, **models)
     return MockProvider()
 
 
@@ -211,6 +214,35 @@ async def health() -> dict:
     }
 
 
+@app.get("/api/models")
+async def available_groq_models(request: Request) -> dict:
+    """Fetch the active model catalog for this request's Groq key."""
+    api_key = _client_key(request)
+    if not api_key:
+        raise HTTPException(409, "add a Groq API key to load models available to your account")
+    if not api_key.startswith("gsk_"):
+        raise HTTPException(400, "that does not look like a Groq API key (expected gsk_...)")
+    provider = GroqProvider(api_key)
+    try:
+        models = await provider.list_models()
+    except LLMError as exc:
+        status = exc.status if exc.status and 400 <= exc.status < 500 else 502
+        raise HTTPException(status, str(exc)) from exc
+    except Exception as exc:
+        log.warning("could not load Groq models: %s", exc)
+        raise HTTPException(502, "could not load the Groq model list; try again") from exc
+    finally:
+        await provider.aclose()
+    return {
+        "models": models,
+        "defaults": {
+            "architect": config.ARCHITECT_MODEL,
+            "writer": config.WRITER_MODEL,
+            "editor": config.EDITOR_MODEL,
+        },
+    }
+
+
 @app.get("/api/presets")
 async def presets() -> dict:
     return config.presets_payload()
@@ -224,6 +256,14 @@ async def create_book(payload: BookRequest, request: Request) -> JSONResponse:
     api_key = _client_key(request)
     if api_key and not api_key.startswith("gsk_"):
         raise HTTPException(400, "that does not look like a Groq API key (expected gsk_...)")
+
+    selected_models = {
+        "architect_model": payload.architect_model,
+        "writer_model": payload.writer_model,
+        "editor_model": payload.editor_model,
+    }
+    if not api_key and any(selected_models.values()):
+        raise HTTPException(409, "Groq model selection requires a Groq API key; demo mode uses fixed fixtures")
 
     directives, strength, extra = expand_profile(payload)
     spec = BookSpec(
@@ -243,7 +283,7 @@ async def create_book(payload: BookRequest, request: Request) -> JSONResponse:
         pov=payload.pov,
         review_outline=payload.review_outline,
     )
-    provider = _provider(api_key)
+    provider = _provider(api_key, **selected_models)
     job = store.create(spec, provider)
     job.task = asyncio.create_task(run_book(job, spec, provider))
     log.info("job %s queued (%s): %s", job.id, provider.name, payload.topic)
