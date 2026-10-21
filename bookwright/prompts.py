@@ -37,6 +37,23 @@ PLAN_JSON_SHAPE = """{
 }"""
 
 
+def style_block(directives: list[str], extra: str = "") -> str:
+    """Render the anti-pattern controls into prompt lines.
+
+    Only ids present in config.ANTI_PATTERNS are honoured, so the API can never
+    inject arbitrary text through the directive list.
+    """
+    lines = [
+        f"- {config.ANTI_PATTERNS[key][1]}"
+        for key in directives
+        if key in config.ANTI_PATTERNS
+    ]
+    extra = (extra or "").strip()
+    if extra:
+        lines.append(f"- House style, from the author: {extra[: config.MAX_EXTRA_INSTRUCTIONS]}")
+    return "\n".join(lines)
+
+
 def plan_messages(*, topic: str, audience: str, tone: str, length) -> list[dict]:
     tone_desc = config.TONES.get(tone, tone)
     system = (
@@ -84,6 +101,9 @@ Thesis: {thesis}
 Reader: {audience}
 Voice: {voice}
 
+## Voice constraints
+{style}
+
 ## Standing glossary
 {glossary}
 
@@ -92,8 +112,11 @@ Voice: {voice}
 """
 
 
-def build_bible(plan: Plan, summaries: list[tuple[str, str]], terms: list[str]) -> str:
+def build_bible(
+    plan: Plan, summaries: list[tuple[str, str]], terms: list[str], style: str = ""
+) -> str:
     glossary = "\n".join(f"- {t}" for t in terms) if terms else "- (nothing fixed yet)"
+    style_text = style.strip() or "- (none specified)"
     if summaries:
         window = summaries[-config.BIBLE_SUMMARY_WINDOW :]
         lines = []
@@ -110,6 +133,7 @@ def build_bible(plan: Plan, summaries: list[tuple[str, str]], terms: list[str]) 
         thesis=plan.thesis or "(implied by the plan)",
         audience=plan.audience,
         voice=plan.voice,
+        style=style_text,
         glossary=glossary,
         summaries=written,
     )
@@ -121,6 +145,7 @@ def chapter_messages(
     chapter: Chapter,
     part_title: str,
     bible: str,
+    style: str = "",
     continuation: bool = False,
 ) -> list[dict]:
     beats = "\n".join(f"{i}. {b}" for i, b in enumerate(chapter.beats, 1)) or "1. (writer's discretion)"
@@ -140,6 +165,11 @@ def chapter_messages(
         "- End the chapter on a line that makes the next chapter feel necessary.\n"
         f"- Length: about {chapter.words} words. Stop when the chapter is done.\n"
     )
+    if style.strip():
+        system += (
+            "\nVoice constraints. These override your defaults and are checked by the editor:\n"
+            f"{style}\n"
+        )
     user = (
         f"{bible}\n\n"
         f"# Part: {part_title}\n"

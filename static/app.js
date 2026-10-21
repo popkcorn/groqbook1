@@ -14,6 +14,8 @@
     key: sessionStorage.getItem("bookwright.key") || "",
     mode: "demo",
     length: "standard",
+    directives: [],
+    preset: null,
     job: null,
     plan: null,
     chapters: new Map(), // index -> { text, status, title, node, bodyNode, words }
@@ -194,6 +196,7 @@
       chip.addEventListener("click", () => {
         state.length = preset.id;
         [...chips.children].forEach((c) => c.setAttribute("aria-checked", String(c === chip)));
+        $("#custom-length").hidden = preset.id !== "custom";
         updateEstimate(presets);
       });
       chip.setAttribute("aria-checked", String(preset.id === presets.defaults.length));
@@ -201,17 +204,80 @@
     });
     state.length = presets.defaults.length;
     state.presets = presets;
+
+    // Custom length inputs
+    const chap = $("#c-chapters");
+    const words = $("#c-words");
+    const [minCh, maxCh] = presets.limits.chapters_range;
+    const [minW, maxW] = presets.limits.words_range;
+    chap.min = minCh; chap.max = maxCh;
+    words.min = minW; words.max = maxW;
+    const syncCustom = () => {
+      chap.value = Math.min(Math.max(Number(chap.value) || minCh, minCh), maxCh);
+      words.value = Math.min(Math.max(Number(words.value) || minW, minW), maxW);
+      const total = Number(chap.value) * Number(words.value);
+      $("#custom-summary").textContent =
+        `${chap.value} chapters · ~${nf.format(total)} words`;
+      updateEstimate(presets);
+    };
+    chap.addEventListener("input", syncCustom);
+    words.addEventListener("input", syncCustom);
+
+    // Style toggles
+    const toggles = $("#anti-patterns");
+    const defaults = new Set(presets.default_directives || []);
+    presets.anti_patterns.forEach((item) => {
+      const label = el("label", "toggle");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = item.id;
+      input.checked = defaults.has(item.id);
+      const text = el("span", "t-label", item.label);
+      text.append(el("span", "t-desc", item.description));
+      label.append(input, text);
+      input.addEventListener("change", () => {
+        state.directives = [...toggles.querySelectorAll("input:checked")].map((i) => i.value);
+        paintStyleCount();
+        updateEstimate(presets);
+      });
+      toggles.append(label);
+    });
+    state.directives = [...toggles.querySelectorAll("input:checked")].map((i) => i.value);
+    paintStyleCount();
+
+    const extra = $("#extra-instructions");
+    extra.addEventListener("input", () => {
+      $("#extra-count").textContent = extra.value.length;
+      updateEstimate(presets);
+    });
+
     updateEstimate(presets);
   }
 
+  function currentLength(presets) {
+    const p = presets.lengths.find((x) => x.id === state.length) || presets.lengths[1];
+    if (p.id !== "custom") return p;
+    const chapters = Number($("#c-chapters").value) || p.chapters;
+    const words = Number($("#c-words").value) || p.words_per_chapter;
+    return { ...p, chapters, words_per_chapter: words, total_words: chapters * words };
+  }
+
   function updateEstimate(presets) {
-    if (state.key) {
-      const p = presets.lengths.find((x) => x.id === state.length);
-      $("#estimate").textContent = `Live mode · ${p.chapters} chapters, about ${compact(p.total_words)} words of output.`;
-      return;
-    }
-    const p = presets.lengths.find((x) => x.id === state.length);
-    $("#estimate").textContent = `Demo mode · ${p.chapters} chapters of fixture prose. Add a Groq key for real writing.`;
+    const p = currentLength(presets);
+    const styleBits = [];
+    if (state.directives.length) styleBits.push(`${state.directives.length} style rules`);
+    const extra = $("#extra-instructions").value.trim();
+    if (extra) styleBits.push("house style");
+    const suffix = styleBits.length ? ` · ${styleBits.join(" + ")}` : "";
+    const words = compact(p.total_words);
+    $("#estimate").textContent = state.key
+      ? `Live mode · ${p.chapters} chapters, about ${words} words of output${suffix}.`
+      : `Demo mode · ${p.chapters} chapters of fixture prose${suffix}. Add a Groq key for real writing.`;
+  }
+
+  function paintStyleCount() {
+    const n = state.directives.length;
+    $("#style-count").textContent = n ? `${n} active` : "all off";
   }
 
   $("#topic").addEventListener("input", (e) => {
@@ -239,12 +305,7 @@
     try {
       const res = await api("/api/books", {
         method: "POST",
-        body: JSON.stringify({
-          topic,
-          audience: $("#audience").value,
-          tone: $("#tone").value,
-          length: state.length,
-        }),
+        body: JSON.stringify(buildPayload(topic)),
       });
       state.job = res.id;
       state.mode = res.mode;
@@ -263,6 +324,22 @@
       button.disabled = false;
     }
   });
+
+  function buildPayload(topic) {
+    const payload = {
+      topic,
+      audience: $("#audience").value,
+      tone: $("#tone").value,
+      length: state.length,
+      directives: state.directives,
+      extra_instructions: $("#extra-instructions").value.trim(),
+    };
+    if (state.length === "custom") {
+      payload.chapters = Number($("#c-chapters").value);
+      payload.words_per_chapter = Number($("#c-words").value);
+    }
+    return payload;
+  }
 
   $("#again").addEventListener("click", () => {
     resetReader();
@@ -483,6 +560,10 @@
       el("div", "rule"),
       el("p", "meta", `${plan.audience} · ${plan.chapter_count} chapters · ${compact(plan.total_words)} words`)
     );
+    const styleSummary = $("#style-panel") ? state.directives.length : 0;
+    if (styleSummary) {
+      cover.append(el("p", "cover-style", `${styleSummary} style rules applied`));
+    }
     if (plan.thesis) cover.append(el("p", "thesis", plan.thesis));
     book.append(cover);
 

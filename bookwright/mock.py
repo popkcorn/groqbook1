@@ -232,9 +232,15 @@ class MockProvider:
         return plan, Usage(prompt_tokens=180, completion_tokens=words, elapsed=0.35)
 
     async def write_chapter(
-        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str
+        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = ""
     ) -> AsyncIterator[dict]:
         text = compose_chapter(plan.title, chapter, chapter.words)
+        # Demo prose is fixture text, but honour the visible directives so the
+        # style controls demonstrate an observable effect without a key.
+        if "at most one em dash" in style:
+            text = text.replace(" — ", ", ").replace("—", ",")
+        if "Do not address the reader as 'you'" in style:
+            text = text.replace(" you ", " one ").replace(" your ", " one's ")
         started = time.perf_counter()
         words = text.split(" ")
         chunk: list[str] = []

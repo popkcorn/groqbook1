@@ -137,6 +137,74 @@ docker build -t bookwright .
 docker run -p 8000:8000 -e GROQ_API_KEY=gsk_... bookwright
 ```
 
+## Lengths, voices and style controls
+
+### Length
+
+| Preset | Chapters | Words/chapter | Total |
+|---|---|---|---|
+| Chapbook | 4 | 420 | ~1,700 |
+| Standard | 6 | 650 | ~3,900 |
+| Deep dive | 8 | 900 | ~7,200 |
+| Folio | 10 | 1,000 | ~10,000 |
+| Novella | 12 | 1,200 | ~14,400 |
+| Tome | 14 | 1,400 | ~19,600 |
+| Epic | 20 | 1,500 | ~30,000 |
+| **Custom** | 2–20 | 250–2,000 | up to ~40,000 |
+
+The writer's token budget scales with the requested chapter length
+(`config.writer_tokens_for`), so long chapters finish in one call instead of
+tripping the completion ceiling and needing continuation.
+
+### Voices
+
+Twelve, grouped in the picker: **plain** (clear, conversational, minimal),
+**literary** (narrative, lyrical, playful), **argument** (rigorous, journalistic,
+editorial, socratic) and **specialist** (technical, satirical). The voice shapes
+the architect's plan as well as the prose.
+
+### Style controls — getting away from "AI voice"
+
+Thirteen switches, each injecting a precise instruction into every chapter prompt
+*and* into the continuity bible, so the constraint survives across waves rather
+than drifting after chapter three:
+
+| Rule | What it forbids |
+|---|---|
+| Stock phrases | *delve, tapestry, testament to, navigate the complexities, it is worth noting…* |
+| "Not just X, but Y" | The `it is not just X, it is Y` and `not only… but also` scaffolds |
+| Rule-of-three lists | Three-item lists used as rhythm filler |
+| Em-dash tics | More than one em dash per chapter |
+| "In a world where…" openers | Formulaic openings and rhetorical-question hooks |
+| Hedging | *arguably, it can be argued, some might say* |
+| Chapter recaps | *In this chapter we will*, *as we have seen*, closing summaries |
+| Uniform rhythm | Three paragraphs or sentences of identical shape |
+| Grand claims | Sweeping statements about humanity or the future |
+| Question headings | Section headings phrased as questions |
+| Bullet-point prose | Lists that should have been paragraphs |
+| No "you" | Second-person address |
+| No "I" | First-person anecdote |
+
+Five are on by default (stock phrases, not-just, hedging, recaps, uniform
+rhythm). Below the switches is a free-text **house style** box (400 chars) for
+anything the presets miss — British spelling, no rhetorical questions, name real
+places, and so on.
+
+Everything is passed as data (`config.ANTI_PATTERNS`) so the API, the UI and the
+tests agree on the same catalogue; unknown rule ids are rejected with a 422
+rather than silently ignored.
+
+```bash
+# same controls from the API
+curl -X POST localhost:8000/api/books -H 'content-type: application/json' -d '{
+  "topic": "why maintenance is the real design problem",
+  "tone": "journalistic", "length": "custom",
+  "chapters": 9, "words_per_chapter": 1200,
+  "directives": ["cliches", "not_just", "em_dash", "no_second_person"],
+  "extra_instructions": "British spelling, no rhetorical questions"
+}'
+```
+
 ## Layout
 
 ```
@@ -151,7 +219,7 @@ bookwright/
   exporters.py   Markdown · HTML · EPUB 3 · PDF
 server.py        FastAPI: JSON API, SSE stream, export endpoints
 static/          dependency-free front-end (no build step, no CDN)
-tests/           24 tests: schema, pipeline, cancel, continuity, env, exports
+tests/           34 tests: schema, pipeline, cancel, continuity, env, style, exports
 run.py           standalone launcher: checks deps, loads .env, opens the browser
 start-windows.bat / start-mac-linux.sh
                  double-click / one-command setup for a fresh machine
@@ -204,15 +272,19 @@ Interactive docs: `/api/docs`.
 
 - In-memory job store (24 books, 3 concurrent); restarting the server drops them.
 - No auth or per-user quota. Run it for yourself or behind your own gateway.
-- Content is model output. The app estimates 6–9k words per book; quality depends entirely on the
-  routed models, and claims should be verified before anyone relies on them.
+- Content is model output. Quality depends entirely on the routed models, and claims should be
+  verified before anyone relies on them.
+- Long books are slow by design: chapters run in waves of 3 and each wave waits for its
+  summaries before the next starts. An Epic (20 chapters) is roughly seven waves.
+- The continuity window carries 10 chapter summaries. Past ~14 chapters the earliest ones fall
+  out of the bible, so very long books will drift; that is a model-context limit, not a bug.
 - Demo-mode prose is fixture text and will read like fixture text. That is intentional.
 
 ## Development
 
 ```bash
 pip install -r requirements-bookwright.txt pytest pymupdf ruff
-BOOKWRIGHT_MOCK_DELAY=0 pytest -q      # 24 tests, no network, no key
+BOOKWRIGHT_MOCK_DELAY=0 pytest -q      # 34 tests, no network, no key
 ruff check bookwright server.py
 ```
 

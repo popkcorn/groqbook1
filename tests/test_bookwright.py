@@ -141,10 +141,10 @@ def test_bible_is_carried_between_waves():
     seen: list[str] = []
 
     class Recording(MockProvider):
-        async def write_chapter(self, *, plan, chapter, part_title, bible):
+        async def write_chapter(self, *, plan, chapter, part_title, bible, style=""):
             seen.append(bible)
             async for event in super().write_chapter(
-                plan=plan, chapter=chapter, part_title=part_title, bible=bible
+                plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style
             ):
                 yield event
 
@@ -162,9 +162,9 @@ def test_bible_is_carried_between_waves():
 
 def test_cancel_marks_job_cancelled():
     class SlowProvider(MockProvider):
-        async def write_chapter(self, *, plan, chapter, part_title, bible):
+        async def write_chapter(self, *, plan, chapter, part_title, bible, style=""):
             async for event in super().write_chapter(
-                plan=plan, chapter=chapter, part_title=part_title, bible=bible
+                plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style
             ):
                 await asyncio.sleep(0.02)
                 yield event
@@ -325,3 +325,121 @@ def test_launcher_exposes_expected_flags():
     assert result.returncode == 0, result.stderr
     for flag in ("--host", "--port", "--reload", "--no-browser", "--install"):
         assert flag in result.stdout
+
+
+# --------------------------------------------------------------------------- #
+# Length options, voices and style controls
+# --------------------------------------------------------------------------- #
+def test_length_presets_grow_monotonically():
+    words = [config.LENGTHS[key].total_words for key in ("chapbook", "standard", "deep",
+                                                          "folio", "novella", "tome", "epic")]
+    assert words == sorted(words)
+    assert config.LENGTHS["epic"].total_words >= 30_000
+    assert config.LENGTHS["chapbook"].total_words < 2_000
+
+
+def test_custom_length_overrides_and_clamps():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="custom",
+                    chapters_override=12, words_override=1300)
+    assert spec.length.chapters == 12
+    assert spec.length.words_per_chapter == 1300
+    assert spec.length.total_words == 12 * 1300
+
+    too_big = BookSpec(topic="t", audience="a", tone="clear", length_id="custom",
+                       chapters_override=99, words_override=9_999)
+    assert too_big.length.chapters == config.MAX_CHAPTERS
+    assert too_big.length.words_per_chapter == config.WORDS_PER_CHAPTER_RANGE[1]
+
+
+def test_writer_token_budget_scales_with_chapter_length():
+    assert config.writer_tokens_for(250) == 2_200          # floor for short chapters
+    assert config.writer_tokens_for(1_000) == 2_200        # still under the old ceiling
+    assert config.writer_tokens_for(1_500) > config.writer_tokens_for(1_000)
+    assert config.writer_tokens_for(2_000) <= 8_000
+    assert config.writer_tokens_for(2_000) > config.writer_tokens_for(1_500)
+
+
+def test_style_block_renders_only_known_directives():
+    from bookwright.prompts import style_block
+
+    text = style_block(["cliches", "not_a_real_rule"], "British spelling")
+    assert "delve" in text
+    assert "not_a_real_rule" not in text
+    assert "British spelling" in text
+
+
+def test_writer_prompt_carries_style_constraints():
+    from bookwright.prompts import chapter_messages, style_block
+    from bookwright.schema import Chapter, Part, Plan
+
+    plan = Plan(title="T", subtitle="", thesis="", audience="Reader", voice="plain",
+                parts=[Part(1, "P", "", [Chapter(1, "C", "do it")])])
+    style = style_block(config.DEFAULT_DIRECTIVES, "no jargon")
+    messages = chapter_messages(
+        plan=plan, chapter=plan.chapters[0], part_title="P", bible="bible text", style=style
+    )
+    system = messages[0]["content"]
+    assert "Voice constraints" in system
+    assert "no jargon" in system
+    assert "In this chapter we will" in system  # the recap rule is present
+
+
+def test_bible_repeats_the_voice_constraints():
+    from bookwright.prompts import build_bible
+    from bookwright.schema import Chapter, Part, Plan
+
+    plan = Plan(title="T", subtitle="", thesis="", audience="R", voice="plain",
+                parts=[Part(1, "P", "", [Chapter(1, "C", "p")])])
+    bible = build_bible(plan, [], [], style="- no hedging")
+    assert "## Voice constraints" in bible
+    assert "- no hedging" in bible
+
+
+def test_spec_drops_unknown_directives_and_keeps_order():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard",
+                    directives=["hedging", "nope", "cliches", "hedging"])
+    assert spec.clean_directives() == ["hedging", "cliches"]
+
+
+def test_presets_payload_exposes_style_data():
+    payload = config.presets_payload()
+    assert len(payload["anti_patterns"]) == len(config.ANTI_PATTERNS)
+    assert payload["default_directives"]
+    assert len(payload["tones"]) >= 10
+    assert set(payload["tone_groups"]) >= {"plain", "literary", "argument", "specialist"}
+    assert payload["limits"]["chapters_range"] == list(config.CHAPTERS_RANGE)
+
+
+def test_request_validation_rejects_bad_style_input():
+    from pydantic import ValidationError
+
+    from server import BookRequest
+
+    ok = BookRequest(topic="a decent topic", directives=["cliches"], extra_instructions=" tight ")
+    assert ok.directives == ["cliches"]
+    assert ok.extra_instructions == "tight"
+
+    for bad in ({"directives": ["invented"]}, {"words_per_chapter": 9_000}, {"chapters": 1}):
+        payload = {"topic": "a decent topic", **bad}
+        try:
+            BookRequest(**payload)
+        except ValidationError:
+            continue
+        raise AssertionError(f"expected validation failure for {bad}")
+
+
+def test_custom_length_reaches_the_writer():
+    from bookwright.prompts import chapter_messages
+    from bookwright.schema import parse_plan
+
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="custom",
+                    chapters_override=5, words_override=1500)
+    plan = parse_plan(
+        {"title": "T", "parts": [{"title": "P", "chapters": [
+            {"title": f"C{i}", "purpose": "p"} for i in range(5)]}]},
+        topic="t", audience="a", tone="clear",
+        words_per_chapter=spec.length.words_per_chapter, max_chapters=config.MAX_CHAPTERS,
+    )
+    assert plan.chapters[0].words == 1500
+    messages = chapter_messages(plan=plan, chapter=plan.chapters[0], part_title="P", bible="b")
+    assert "about 1500 words" in messages[0]["content"]

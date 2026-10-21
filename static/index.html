@@ -49,7 +49,34 @@
       <div class="field">
         <span class="label">Length</span>
         <div class="chips" id="lengths" role="radiogroup" aria-label="Length"></div>
+        <div class="custom-length" id="custom-length" hidden>
+          <label class="mini">
+            <span>Chapters</span>
+            <input id="c-chapters" type="number" min="2" max="20" step="1" value="10">
+          </label>
+          <label class="mini">
+            <span>Words / chapter</span>
+            <input id="c-words" type="number" min="250" max="2000" step="50" value="1000">
+          </label>
+          <p class="hint" id="custom-summary">10 chapters · ~10,000 words</p>
+        </div>
       </div>
+
+      <details class="style-panel" id="style-panel">
+        <summary>
+          <span>Style controls</span>
+          <span class="style-count" id="style-count">5 active</span>
+        </summary>
+        <p class="hint panel-hint">Switch off the patterns you don't want in the prose. These go
+          into every chapter prompt and are repeated in the continuity bible.</p>
+        <div class="toggles" id="anti-patterns"></div>
+        <label class="field extra-field">
+          <span class="label">House style (optional)</span>
+          <textarea id="extra-instructions" rows="2" maxlength="400"
+            placeholder="e.g. British spelling, no rhetorical questions, name real places, keep paragraphs short"></textarea>
+          <span class="hint"><span id="extra-count">0</span>/400 · your own words, applied to every chapter</span>
+        </label>
+      </details>
 
       <button class="primary" id="go" type="submit">
         <span>Write the book</span>

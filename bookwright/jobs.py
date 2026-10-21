@@ -15,7 +15,7 @@ import contextlib
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from . import config, prompts
@@ -31,10 +31,44 @@ class BookSpec:
     audience: str
     tone: str
     length_id: str
+    directives: list[str] = field(default_factory=lambda: list(config.DEFAULT_DIRECTIVES))
+    extra_instructions: str = ""
+    chapters_override: int | None = None
+    words_override: int | None = None
 
     @property
     def length(self) -> config.LengthPreset:
-        return config.LENGTHS[self.length_id]
+        """The preset, with any custom chapter/word overrides applied."""
+        preset = config.LENGTHS[self.length_id]
+        chapters = self.chapters_override or preset.chapters
+        words = self.words_override or preset.words_per_chapter
+        chapters = max(config.CHAPTERS_RANGE[0], min(chapters, config.MAX_CHAPTERS))
+        words = max(config.WORDS_PER_CHAPTER_RANGE[0], min(words, config.WORDS_PER_CHAPTER_RANGE[1]))
+        if (chapters, words) == (preset.chapters, preset.words_per_chapter):
+            return preset
+        parts = max(1, min(round(chapters / 4), config.MAX_PARTS))
+        return replace(
+            preset,
+            chapters=chapters,
+            words_per_chapter=words,
+            parts=parts,
+            blurb=f"{chapters} chapters · ~{chapters * words:,} words",
+            id="custom",
+        )
+
+    @property
+    def style(self) -> str:
+        from .prompts import style_block
+
+        return style_block(self.directives, self.extra_instructions)
+
+    def clean_directives(self) -> list[str]:
+        """Drop unknown ids and de-duplicate, preserving order."""
+        seen: list[str] = []
+        for key in self.directives:
+            if key in config.ANTI_PATTERNS and key not in seen:
+                seen.append(key)
+        return seen
 
     def to_dict(self) -> dict:
         return {
@@ -42,6 +76,10 @@ class BookSpec:
             "audience": self.audience,
             "tone": self.tone,
             "length": self.length_id,
+            "chapters": self.length.chapters,
+            "words_per_chapter": self.length.words_per_chapter,
+            "directives": self.clean_directives(),
+            "extra_instructions": self.extra_instructions,
         }
 
 
@@ -245,11 +283,13 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
                 "message": f"Drafting chapter{'s' if len(wave) > 1 else ''} "
                            + ", ".join(str(c.index) for c in wave),
             })
-            bible = prompts.build_bible(plan, summaries, terms)
+            bible = prompts.build_bible(plan, summaries, terms, style=spec.style)
 
             results = await asyncio.gather(
                 *(
-                    _write_chapter(job, provider, plan, chapter, part_of[chapter.index], bible)
+                    _write_chapter(
+                        job, provider, plan, chapter, part_of[chapter.index], bible, spec.style
+                    )
                     for chapter in wave
                 ),
                 return_exceptions=True,
@@ -328,7 +368,13 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
 
 
 async def _write_chapter(
-    job: Job, provider: Provider, plan: Plan, chapter, part_title: str, bible: str
+    job: Job,
+    provider: Provider,
+    plan: Plan,
+    chapter,
+    part_title: str,
+    bible: str,
+    style: str = "",
 ) -> None:
     state = job.chapters[chapter.index]
     state["status"] = "writing"
@@ -342,7 +388,7 @@ async def _write_chapter(
 
     buffer: list[str] = []
     async for event in provider.write_chapter(
-        plan=plan, chapter=chapter, part_title=part_title, bible=bible
+        plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style
     ):
         if job.cancelled:
             raise asyncio.CancelledError
@@ -371,7 +417,7 @@ def estimate(spec: BookSpec) -> dict[str, Any]:
     chapters = length.chapters
     # Per chapter: prompt grows with the bible window; completion ~1.35 tokens/word.
     per_chapter_in = 620 + 110 * min(chapters, config.BIBLE_SUMMARY_WINDOW)
-    per_chapter_out = int(length.words_per_chapter * 1.35)
+    per_chapter_out = int(length.words_per_chapter * 1.4)
     total_in = 1400 + chapters * per_chapter_in
     total_out = 900 + chapters * per_chapter_out
     return {

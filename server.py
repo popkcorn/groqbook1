@@ -43,6 +43,14 @@ class BookRequest(BaseModel):
     audience: str = Field(default=config.AUDIENCES[0], max_length=60)
     tone: str = Field(default=config.DEFAULT_TONE, max_length=32)
     length: str = Field(default=config.DEFAULT_LENGTH, max_length=32)
+    chapters: int | None = Field(default=None, ge=config.CHAPTERS_RANGE[0], le=config.MAX_CHAPTERS)
+    words_per_chapter: int | None = Field(
+        default=None,
+        ge=config.WORDS_PER_CHAPTER_RANGE[0],
+        le=config.WORDS_PER_CHAPTER_RANGE[1],
+    )
+    directives: list[str] = Field(default_factory=lambda: list(config.DEFAULT_DIRECTIVES))
+    extra_instructions: str = Field(default="", max_length=config.MAX_EXTRA_INSTRUCTIONS)
 
     @field_validator("topic")
     @classmethod
@@ -58,6 +66,19 @@ class BookRequest(BaseModel):
         if value not in config.LENGTHS:
             raise ValueError(f"unknown length preset: {value}")
         return value
+
+    @field_validator("directives")
+    @classmethod
+    def _known_directives(cls, value: list[str]) -> list[str]:
+        unknown = [key for key in value if key not in config.ANTI_PATTERNS]
+        if unknown:
+            raise ValueError(f"unknown style directive(s): {', '.join(unknown)}")
+        return list(dict.fromkeys(value))
+
+    @field_validator("extra_instructions")
+    @classmethod
+    def _clean_extra(cls, value: str) -> str:
+        return " ".join(value.split())[: config.MAX_EXTRA_INSTRUCTIONS]
 
     @field_validator("tone")
     @classmethod
@@ -115,7 +136,14 @@ async def create_book(payload: BookRequest, request: Request) -> JSONResponse:
         raise HTTPException(400, "that does not look like a Groq API key (expected gsk_...)")
 
     spec = BookSpec(
-        topic=payload.topic, audience=payload.audience, tone=payload.tone, length_id=payload.length
+        topic=payload.topic,
+        audience=payload.audience,
+        tone=payload.tone,
+        length_id=payload.length,
+        directives=payload.directives,
+        extra_instructions=payload.extra_instructions,
+        chapters_override=payload.chapters,
+        words_override=payload.words_per_chapter,
     )
     provider = _provider(api_key)
     job = store.create(spec, provider)
