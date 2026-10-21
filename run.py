@@ -59,6 +59,9 @@ def check_dependencies(install: bool) -> None:
     requirements = ROOT / "requirements-bookwright.txt"
     print(f"\n  Missing packages: {', '.join(missing)}")
     print(f"  Install them with:\n\n    {Path(sys.executable).name} -m pip install -r \"{requirements}\"\n")
+    print("  Or just use the start script, which creates a virtual environment for you:")
+    print("    bash start-mac-linux.sh        (macOS/Linux)")
+    print("    start-windows.bat              (Windows)\n")
 
     if not install:
         fail("dependencies are not installed (re-run with --install to attempt it automatically)")

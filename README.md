@@ -70,10 +70,11 @@ Then it opens <http://localhost:8000> in your browser.
 ```bash
 git clone https://github.com/popkcorn/groqbook1.git
 cd groqbook1
-./start-mac-linux.sh
+bash start-mac-linux.sh
 ```
 
-If the shell refuses to run it: `chmod +x start-mac-linux.sh` first.
+`bash` is used deliberately: ZIP downloads lose the executable bit, so
+`./start-mac-linux.sh` would fail with "permission denied" (fix: `chmod +x start-mac-linux.sh`).
 
 ### Any OS, manually
 
@@ -83,6 +84,17 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements-bookwright.txt
 python run.py
 ```
+
+### Getting the files
+
+- **Merged into `main`?** Green **Code** button → **Download ZIP**.
+- **In the pull request?** Download the branch directly:
+  `https://github.com/popkcorn/groqbook1/archive/refs/heads/arena/2d950417-groqbook1.zip`
+- **Releases page:** <https://github.com/popkcorn/groqbook1/releases> has a
+  `bookwright-source.zip` with no `.git` folder.
+
+Extract anywhere (Desktop is fine) and run the start script from inside the extracted
+`groqbook1-*` folder. Do not run it from inside the ZIP viewer.
 
 ### Adding your API key
 
