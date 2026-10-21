@@ -544,3 +544,25 @@ textarea:focus, select:focus, input:focus {
 .outline-toggle { margin: .9rem 0 .2rem; }
 .toggle.muted { opacity: .45; }
 .toggle.muted .t-desc { text-decoration: line-through; }
+
+/* ------------------------------------------------------------- export layout */
+.export-options {
+  margin: .6rem 0 .8rem; padding: .65rem .7rem;
+  border: 1px solid var(--rule); border-radius: 3px; background: var(--paper);
+}
+.export-options summary {
+  cursor: pointer; font-size: .72rem; font-weight: 600; color: var(--ink-soft);
+}
+.export-controls {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem;
+  margin-top: .65rem;
+}
+.export-controls .mini { min-width: 0; }
+.export-controls select { width: 100%; max-width: 100%; font-size: .72rem; }
+.export-checks {
+  display: grid; gap: .35rem; margin-top: .7rem;
+  color: var(--ink-soft); font-size: .72rem;
+}
+.export-checks label { display: flex; align-items: flex-start; gap: .4rem; }
+.export-checks input { margin: .2rem 0 0; accent-color: var(--amber); }
+.export-options > .hint { margin-top: .6rem; }

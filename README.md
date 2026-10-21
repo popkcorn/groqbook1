@@ -390,6 +390,22 @@ curl -N localhost:8000/api/books/<id>/events          # live progress
 curl -OJ localhost:8000/api/books/<id>/export/pdf
 ```
 
+### Export layout controls
+
+After a book has text, the Export panel lets you choose page size (A5, A4, Letter),
+margins (narrow, normal, wide), chapter label (`Chapter 1`, `1.`, or title only), body font size (9–14 pt), line
+spacing, paragraph indents versus spacing, left versus justified alignment, chapter
+page breaks, and PDF running headers/page numbers. These settings apply at export
+time; they do not change the generated prose. Page size and pagination apply to PDF
+and print-ready HTML. EPUB readers control their own pagination; EPUB still honors
+the typography and heading choices. Markdown reflects the chapter-heading style.
+
+The same settings are available as query parameters, for example:
+
+```text
+/api/books/<id>/export/pdf?page_size=letter&margins=wide&chapter_heading=number&body_font_size=12&line_spacing=airy&paragraph_style=space&alignment=left&chapter_new_page=false&running_matter=false
+```
+
 For grounded or reviewed books, `POST /api/books` also accepts `notes`,
 `voice_sample`, `pov` (`auto`, `first`, `we`, `you`, `third`), and
 `review_outline`. Browser review defaults on; API clients opt in with

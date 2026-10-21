@@ -18,6 +18,57 @@ from pathlib import Path
 
 from .schema import Plan
 
+
+@dataclass(frozen=True)
+class ExportOptions:
+    """Author-selected layout settings shared by the export formats."""
+
+    page_size: str = "a5"
+    margins: str = "normal"
+    chapter_heading: str = "chapter"
+    body_font_size: int = 10
+    line_spacing: str = "normal"
+    paragraph_style: str = "indent"
+    alignment: str = "justify"
+    chapter_new_page: bool = True
+    running_matter: bool = True
+
+    def __post_init__(self):
+        if self.page_size not in PAGE_SIZES:
+            raise ValueError(f"page_size must be one of {sorted(PAGE_SIZES)}")
+        if self.margins not in PAGE_MARGINS:
+            raise ValueError(f"margins must be one of {sorted(PAGE_MARGINS)}")
+        if self.chapter_heading not in CHAPTER_HEADINGS:
+            raise ValueError(f"chapter_heading must be one of {sorted(CHAPTER_HEADINGS)}")
+        if self.body_font_size not in FONT_SIZES:
+            raise ValueError(f"body_font_size must be one of {sorted(FONT_SIZES)}")
+        if self.line_spacing not in LINE_SPACING:
+            raise ValueError(f"line_spacing must be one of {sorted(LINE_SPACING)}")
+        if self.paragraph_style not in PARAGRAPH_STYLES:
+            raise ValueError(f"paragraph_style must be one of {sorted(PARAGRAPH_STYLES)}")
+        if self.alignment not in ALIGNMENTS:
+            raise ValueError(f"alignment must be one of {sorted(ALIGNMENTS)}")
+
+
+PAGE_SIZES = {"a5": "A5", "a4": "A4", "letter": "Letter"}
+# Horizontal, top, bottom in millimetres.
+PAGE_MARGINS = {"narrow": (12, 14, 15), "normal": (17, 19, 20), "wide": (25, 25, 25)}
+CHAPTER_HEADINGS = {"chapter", "number", "title"}
+FONT_SIZES = {9, 10, 11, 12, 13, 14}
+LINE_SPACING = {"compact": 1.3, "normal": 1.5, "airy": 1.8}
+PARAGRAPH_STYLES = {"indent", "space"}
+ALIGNMENTS = {"justify", "left"}
+DEFAULT_EXPORT_OPTIONS = ExportOptions()
+
+
+def _chapter_marker(index: int, style: str) -> str:
+    if style == "chapter":
+        return f"Chapter {index}"
+    if style == "number":
+        return f"{index}."
+    return ""
+
+
 FONT_DIRS = [
     Path("/usr/share/fonts/truetype/dejavu"),
     Path("/usr/share/fonts/TTF"),
@@ -160,7 +211,10 @@ def slug(text: str, fallback: str = "book") -> str:
 # --------------------------------------------------------------------------- #
 # Markdown / HTML
 # --------------------------------------------------------------------------- #
-def to_markdown(plan: Plan, chapters: dict[int, dict]) -> str:
+def to_markdown(
+    plan: Plan, chapters: dict[int, dict], *, options: ExportOptions | None = None
+) -> str:
+    options = options or DEFAULT_EXPORT_OPTIONS
     lines = [f"# {plan.title}", "", f"*{plan.subtitle}*", ""]
     if plan.thesis:
         lines += [f"> {plan.thesis}", ""]
@@ -170,7 +224,11 @@ def to_markdown(plan: Plan, chapters: dict[int, dict]) -> str:
         if part.summary:
             lines += [f"*{part.summary}*", ""]
         for chapter in part.chapters:
-            lines += [f"### Chapter {chapter.index}. {chapter.title}", ""]
+            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            if marker and options.chapter_heading == "chapter":
+                marker += "."
+            heading = f"{marker} {chapter.title}".strip()
+            lines += [f"### {heading}", ""]
             lines += [(chapters.get(chapter.index, {}).get("text") or "").strip(), ""]
     return "\n".join(lines).strip() + "\n"
 
@@ -181,7 +239,7 @@ HTML_CSS = """
 html { background:#efe7d9; }
 body { margin:0; color:var(--ink); background:var(--paper);
   font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
-  font-size:11.4pt; line-height:1.62; text-rendering:optimizeLegibility; }
+  font-size:var(--body-size,10pt); line-height:var(--line-spacing,1.5); text-rendering:optimizeLegibility; }
 .page { max-width:34em; margin:0 auto; padding:4rem 2.2rem 6rem; }
 .cover { min-height:80vh; display:flex; flex-direction:column; justify-content:center;
   page-break-after:always; break-after:page; }
@@ -207,13 +265,13 @@ body { margin:0; color:var(--ink); background:var(--paper);
 .part-title { page-break-before:always; break-before:page; padding-top:22vh; }
 .part-title h3 { font-size:1.9rem; margin:0 0 .8rem; font-weight:600; }
 .part-title p { color:var(--muted); font-style:italic; max-width:24em; }
-.chapter { page-break-before:always; break-before:page; }
+.chapter.page-break { page-break-before:always; break-before:page; }
 .chapter .ch-head { margin-bottom:2rem; }
 .chapter .ch-num { font-family:ui-sans-serif,system-ui,sans-serif; font-size:.7rem;
   letter-spacing:.2em; text-transform:uppercase; color:var(--muted); }
 .chapter h2 { font-size:1.75rem; line-height:1.2; margin:.4rem 0 0; font-weight:600; }
-.chapter p { margin:0 0 0; text-align:justify; hyphens:auto; }
-.chapter p + p, .chapter ul + p, .chapter blockquote + p { text-indent:1.4em; margin-top:0; }
+.chapter p { margin:0 0 var(--paragraph-gap,0); text-align:var(--body-align,justify); hyphens:auto; }
+.chapter p + p, .chapter ul + p, .chapter blockquote + p { text-indent:var(--paragraph-indent,1.4em); margin-top:0; }
 .chapter h3 { font-family:ui-sans-serif,system-ui,sans-serif; font-size:.86rem;
   letter-spacing:.12em; text-transform:uppercase; margin:1.9rem 0 .7rem; color:var(--muted); }
 .chapter h3 + p { text-indent:0; }
@@ -239,17 +297,25 @@ code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.9em; 
 """
 
 
-def to_html(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | None = None) -> str:
+def to_html(
+    plan: Plan,
+    chapters: dict[int, dict],
+    *,
+    generated_at: datetime | None = None,
+    options: ExportOptions | None = None,
+) -> str:
+    options = options or DEFAULT_EXPORT_OPTIONS
     stamp = (generated_at or datetime.now(UTC)).strftime("%d %B %Y")
     toc = ['<nav class="toc" id="contents"><h2>Contents</h2><ol>']
     for part in plan.parts:
         toc.append(f'<li class="part"><a href="#part-{part.index}">{html.escape(part.title)}</a>')
         toc.append("<ol>")
         for chapter in part.chapters:
+            marker = _chapter_marker(chapter.index, options.chapter_heading)
             toc.append(
                 f'<li class="ch"><a href="#ch-{chapter.index}">'
-                f'<span>{chapter.index:02d}</span>'
-                f"<span>{html.escape(chapter.title)}</span></a></li>"
+                + (f'<span>{html.escape(marker)}</span>' if marker else "")
+                + f"<span>{html.escape(chapter.title)}</span></a></li>"
             )
         toc.append("</ol></li>")
     toc.append("</ol></nav>")
@@ -264,9 +330,12 @@ def to_html(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | N
         )
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
+            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            page_class = " page-break" if options.chapter_new_page else ""
+            label = f'<div class="ch-num">{html.escape(marker)}</div>' if marker else ""
             body.append(
-                f'<article class="chapter" id="ch-{chapter.index}">'
-                f'<header class="ch-head"><div class="ch-num">Chapter {chapter.index}</div>'
+                f'<article class="chapter{page_class}" id="ch-{chapter.index}">'
+                f'<header class="ch-head">{label}'
                 f"<h2>{html.escape(chapter.title)}</h2></header>"
                 f"{blocks_to_html(parse_markdown(text))}</article>"
             )
@@ -275,8 +344,8 @@ def to_html(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | N
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(plan.title)}</title>
-<style>{HTML_CSS}</style></head>
-<body><div class="page">
+<style>{HTML_CSS.replace('@page { size:A5; margin:19mm 17mm 20mm;', f'@page {{ size:{PAGE_SIZES[options.page_size]}; margin:{PAGE_MARGINS[options.margins][1]}mm {PAGE_MARGINS[options.margins][0]}mm {PAGE_MARGINS[options.margins][2]}mm;')}</style></head>
+<body style="--body-size:{options.body_font_size}pt; --line-spacing:{LINE_SPACING[options.line_spacing]}; --body-align:{options.alignment}; --paragraph-indent:{'1.4em' if options.paragraph_style == 'indent' else '0'}; --paragraph-gap:{'0' if options.paragraph_style == 'indent' else '0.75em'};"><div class="page">
 <section class="cover">
   <div class="kicker">A book written with Bookwright</div>
   <div class="rule"></div>
@@ -320,7 +389,10 @@ XHTML = """<?xml version="1.0" encoding="utf-8"?>
 <body>{body}</body></html>"""
 
 
-def to_epub(plan: Plan, chapters: dict[int, dict]) -> bytes:
+def to_epub(
+    plan: Plan, chapters: dict[int, dict], *, options: ExportOptions | None = None
+) -> bytes:
+    options = options or DEFAULT_EXPORT_OPTIONS
     book_id = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, plan.title + plan.subtitle)}"
     modified = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -343,9 +415,13 @@ def to_epub(plan: Plan, chapters: dict[int, dict]) -> bytes:
         toc_items.append(f'<li><a href="{name}">{html.escape(part.title)}</a><ol>')
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
+            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            break_class = " chapter-break" if options.chapter_new_page else ""
+            label = f'<p class="chapter-num">{html.escape(marker)}</p>' if marker else ""
             body = (
+                f'<section class="chapter{break_class}">{label}'
                 f"<h1>{html.escape(chapter.title)}</h1>"
-                f"{blocks_to_html(parse_markdown(text))}"
+                f"{blocks_to_html(parse_markdown(text))}</section>"
             )
             ch_name = f"ch{chapter.index:02d}.xhtml"
             docs.append(
@@ -404,7 +480,25 @@ def to_epub(plan: Plan, chapters: dict[int, dict]) -> bytes:
         zf.writestr("META-INF/container.xml", container, compress_type=zipfile.ZIP_DEFLATED)
         zf.writestr("OEBPS/content.opf", opf, compress_type=zipfile.ZIP_DEFLATED)
         zf.writestr("OEBPS/nav.xhtml", nav, compress_type=zipfile.ZIP_DEFLATED)
-        zf.writestr("OEBPS/style.css", EPUB_CSS, compress_type=zipfile.ZIP_DEFLATED)
+        epub_css = EPUB_CSS.replace(
+            "body { font-family: serif; line-height: 1.6; margin: 0 5%; }",
+            f"body {{ font-family: serif; font-size: {options.body_font_size}pt; "
+            f"line-height: {LINE_SPACING[options.line_spacing]}; margin: 0 5%; }}",
+        )
+        paragraph_margin = "0" if options.paragraph_style == "indent" else "0 0 .75em"
+        paragraph_indent = "1.3em" if options.paragraph_style == "indent" else "0"
+        epub_css = epub_css.replace(
+            "p { margin: 0; text-indent: 1.3em; text-align: justify; }",
+            f"p {{ margin: {paragraph_margin}; text-indent: {paragraph_indent}; "
+            f"text-align: {options.alignment}; }}",
+        )
+        epub_css += (
+            "\n.chapter-break { break-before: page; page-break-before: always; }\n"
+            ".chapter-num { font-family: sans-serif; font-size: .75em; text-indent: 0; }\n"
+            if options.chapter_new_page or options.chapter_heading != "title"
+            else ""
+        )
+        zf.writestr("OEBPS/style.css", epub_css, compress_type=zipfile.ZIP_DEFLATED)
         for _, filename, xhtml in docs:
             zf.writestr(f"OEBPS/{filename}", xhtml, compress_type=zipfile.ZIP_DEFLATED)
     return buffer.getvalue()
@@ -433,10 +527,16 @@ def _font_files() -> dict[str, Path]:
     return found
 
 
-def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | None = None) -> bytes:
+def to_pdf(
+    plan: Plan,
+    chapters: dict[int, dict],
+    *,
+    generated_at: datetime | None = None,
+    options: ExportOptions | None = None,
+) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
-    from reportlab.lib.pagesizes import A5
+    from reportlab.lib.pagesizes import A4, A5, LETTER
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.pdfbase import pdfmetrics
@@ -453,6 +553,7 @@ def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | No
     )
     from reportlab.platypus.tableofcontents import TableOfContents
 
+    options = options or DEFAULT_EXPORT_OPTIONS
     fonts = _font_files()
     if {"serif", "serif_bold", "sans", "sans_bold"} <= fonts.keys():
         for name, path in fonts.items():
@@ -466,6 +567,12 @@ def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | No
     else:  # fall back to base-14 fonts; unicode coverage is lost but layout holds
         serif = serif_bold = "Times-Roman"
         sans = sans_bold = "Helvetica"
+
+    body_size = options.body_font_size
+    body_leading = body_size * LINE_SPACING[options.line_spacing]
+    paragraph_indent = 4.2 * mm if options.paragraph_style == "indent" else 0
+    paragraph_gap = 0 if options.paragraph_style == "indent" else body_size * 0.75
+    body_alignment = TA_JUSTIFY if options.alignment == "justify" else TA_LEFT
 
     styles = {
         "cover_kicker": ParagraphStyle(
@@ -505,24 +612,27 @@ def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | No
             textColor=colors.HexColor("#6b5f52"),
         ),
         "chapter_title": ParagraphStyle(
-            "ChapterTitle", fontName=sans_bold, fontSize=15, leading=19, spaceAfter=14,
+            "ChapterTitle", fontName=sans_bold, fontSize=max(14, body_size * 1.5),
+            leading=max(18, body_size * 1.9), spaceAfter=14, keepWithNext=True,
             textColor=colors.HexColor("#17130f"),
         ),
         "body_first": ParagraphStyle(
-            "BodyFirst", fontName=serif, fontSize=9.6, leading=14.4, alignment=TA_JUSTIFY,
-            spaceAfter=0, firstLineIndent=0,
+            "BodyFirst", fontName=serif, fontSize=body_size, leading=body_leading,
+            alignment=body_alignment, spaceAfter=paragraph_gap, firstLineIndent=0,
         ),
         "body": ParagraphStyle(
-            "Body", fontName=serif, fontSize=9.6, leading=14.4, alignment=TA_JUSTIFY,
-            firstLineIndent=4.2 * mm,
+            "Body", fontName=serif, fontSize=body_size, leading=body_leading,
+            alignment=body_alignment, firstLineIndent=paragraph_indent,
+            spaceAfter=paragraph_gap,
         ),
         "h2": ParagraphStyle(
             "H2", fontName=sans_bold, fontSize=8.2, leading=12, spaceBefore=11,
             spaceAfter=5, textColor=colors.HexColor("#3b3128"),
         ),
         "bullet": ParagraphStyle(
-            "Bullet", fontName=serif, fontSize=9.6, leading=14, leftIndent=5 * mm,
-            bulletIndent=1 * mm, spaceBefore=2,
+            "Bullet", fontName=serif, fontSize=body_size, leading=body_leading,
+            leftIndent=5 * mm, bulletIndent=1 * mm, spaceBefore=2,
+            alignment=body_alignment,
         ),
         "quote": ParagraphStyle(
             "Quote", fontName=serif, fontSize=9.2, leading=14, leftIndent=6 * mm,
@@ -550,14 +660,15 @@ def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | No
         ),
     }
 
-    page_w, page_h = A5
-    margin_x, margin_top, margin_bottom = 17 * mm, 19 * mm, 20 * mm
+    pagesize = {"a5": A5, "a4": A4, "letter": LETTER}[options.page_size]
+    page_w, page_h = pagesize
+    margin_x, margin_top, margin_bottom = (value * mm for value in PAGE_MARGINS[options.margins])
     book_title = plan.title.upper()
 
     class BookDoc(BaseDocTemplate):
         def __init__(self, target):
             super().__init__(
-                target, pagesize=A5, leftMargin=margin_x, rightMargin=margin_x,
+                target, pagesize=pagesize, leftMargin=margin_x, rightMargin=margin_x,
                 topMargin=margin_top, bottomMargin=margin_bottom,
                 title=plan.title, author="Bookwright", subject=plan.subtitle,
                 creator="Bookwright",
@@ -577,6 +688,8 @@ def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | No
             )
 
         def _decorate(self, canvas, doc):
+            if not options.running_matter:
+                return
             canvas.saveState()
             canvas.setFont(sans, 6.6)
             canvas.setFillColor(colors.HexColor("#8a7d6c"))
@@ -649,10 +762,10 @@ def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | No
 
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
-            story += [
-                Paragraph(f"CHAPTER {chapter.index}", styles["chapter_label"]),
-                Paragraph(html.escape(chapter.title), styles["chapter_title"]),
-            ]
+            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            if marker:
+                story.append(Paragraph(html.escape(marker.upper()), styles["chapter_label"]))
+            story.append(Paragraph(html.escape(chapter.title), styles["chapter_title"]))
             first_para = True
             for block in parse_markdown(text):
                 if block.type == "h":
@@ -675,7 +788,11 @@ def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | No
                     story.append(Paragraph(html.escape(block.text).replace("\n", "<br/>"),
                                            styles["code"]))
                     first_para = True
-            story.append(PageBreak())
+            if options.chapter_new_page:
+                story.append(PageBreak())
+
+    if not options.chapter_new_page:
+        story.append(PageBreak())
 
     stamp = (generated_at or datetime.now(UTC)).strftime("%d %B %Y")
     story += [
@@ -695,15 +812,22 @@ def to_pdf(plan: Plan, chapters: dict[int, dict], *, generated_at: datetime | No
     return buffer.getvalue()
 
 
-def export(plan: Plan, chapters: dict[int, dict], fmt: str) -> tuple[bytes, str, str]:
+def export(
+    plan: Plan,
+    chapters: dict[int, dict],
+    fmt: str,
+    *,
+    options: ExportOptions | None = None,
+) -> tuple[bytes, str, str]:
     """Return (bytes, filename, content type)."""
+    options = options or DEFAULT_EXPORT_OPTIONS
     base = slug(plan.title)
     if fmt == "md":
-        return to_markdown(plan, chapters).encode("utf-8"), f"{base}.md", "text/markdown; charset=utf-8"
+        return to_markdown(plan, chapters, options=options).encode("utf-8"), f"{base}.md", "text/markdown; charset=utf-8"
     if fmt == "html":
-        return to_html(plan, chapters).encode("utf-8"), f"{base}.html", "text/html; charset=utf-8"
+        return to_html(plan, chapters, options=options).encode("utf-8"), f"{base}.html", "text/html; charset=utf-8"
     if fmt == "epub":
-        return to_epub(plan, chapters), f"{base}.epub", "application/epub+zip"
+        return to_epub(plan, chapters, options=options), f"{base}.epub", "application/epub+zip"
     if fmt == "pdf":
-        return to_pdf(plan, chapters), f"{base}.pdf", "application/pdf"
+        return to_pdf(plan, chapters, options=options), f"{base}.pdf", "application/pdf"
     raise ValueError(f"unknown format: {fmt}")

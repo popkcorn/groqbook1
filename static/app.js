@@ -1197,7 +1197,18 @@
         const original = button.firstChild.textContent;
         button.firstChild.textContent = "building…";
         try {
-          const res = await fetch(`/api/books/${state.job}/export/${fmt}`);
+          const options = new URLSearchParams({
+            page_size: $("#exp-page-size").value,
+            margins: $("#exp-margins").value,
+            chapter_heading: $("#exp-chapter-heading").value,
+            body_font_size: $("#exp-font-size").value,
+            line_spacing: $("#exp-line-spacing").value,
+            paragraph_style: $("#exp-paragraph-style").value,
+            alignment: $("#exp-alignment").value,
+            chapter_new_page: String($("#exp-chapter-break").checked),
+            running_matter: String($("#exp-running-matter").checked),
+          });
+          const res = await fetch(`/api/books/${state.job}/export/${fmt}?${options}`);
           if (!res.ok) {
             const body = await res.json().catch(() => ({}));
             throw new Error(body.error || `export failed (${res.status})`);

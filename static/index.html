@@ -213,6 +213,66 @@
 
     <section class="export" id="export" hidden>
       <h2>Export</h2>
+      <details class="export-options" open>
+        <summary>Page &amp; text layout</summary>
+        <div class="export-controls">
+          <label class="mini"><span>Page size</span>
+            <select id="exp-page-size">
+              <option value="a5" selected>A5 — compact book</option>
+              <option value="a4">A4</option>
+              <option value="letter">US Letter</option>
+            </select>
+          </label>
+          <label class="mini"><span>Margins</span>
+            <select id="exp-margins">
+              <option value="narrow">Narrow — more text</option>
+              <option value="normal" selected>Normal</option>
+              <option value="wide">Wide — more white space</option>
+            </select>
+          </label>
+          <label class="mini"><span>Chapter heading</span>
+            <select id="exp-chapter-heading">
+              <option value="chapter" selected>Chapter 1</option>
+              <option value="number">1.</option>
+              <option value="title">Title only</option>
+            </select>
+          </label>
+          <label class="mini"><span>Body text size</span>
+            <select id="exp-font-size">
+              <option value="9">9 pt — small</option>
+              <option value="10" selected>10 pt</option>
+              <option value="11">11 pt</option>
+              <option value="12">12 pt — large</option>
+              <option value="13">13 pt</option>
+              <option value="14">14 pt — extra large</option>
+            </select>
+          </label>
+          <label class="mini"><span>Line spacing</span>
+            <select id="exp-line-spacing">
+              <option value="compact">Compact</option>
+              <option value="normal" selected>Normal</option>
+              <option value="airy">Airy</option>
+            </select>
+          </label>
+          <label class="mini"><span>Paragraphs</span>
+            <select id="exp-paragraph-style">
+              <option value="indent" selected>First-line indent</option>
+              <option value="space">Space between paragraphs</option>
+            </select>
+          </label>
+          <label class="mini"><span>Text alignment</span>
+            <select id="exp-alignment">
+              <option value="justify" selected>Justified</option>
+              <option value="left">Left aligned</option>
+            </select>
+          </label>
+        </div>
+        <div class="export-checks">
+          <label><input type="checkbox" id="exp-chapter-break" checked> Start each chapter on a new page</label>
+          <label><input type="checkbox" id="exp-running-matter" checked> PDF running header and page numbers</label>
+        </div>
+        <p class="hint">Page size and page breaks apply to PDF and print-ready HTML. EPUB readers control pagination; Markdown uses the chapter-heading choice only.</p>
+      </details>
       <div class="export-grid" id="export-grid"></div>
       <p class="hint" id="export-hint">Files build on demand from what has been written.</p>
     </section>

@@ -11,7 +11,14 @@ import zipfile
 import pytest
 
 from bookwright import config
-from bookwright.exporters import export, parse_markdown, to_epub, to_markdown
+from bookwright.exporters import (
+    ExportOptions,
+    export,
+    parse_markdown,
+    to_epub,
+    to_html,
+    to_markdown,
+)
 from bookwright.jobs import BookSpec, Job, chunk_text, estimate, run_book
 from bookwright.llm import Usage
 from bookwright.mock import MockProvider
@@ -235,6 +242,51 @@ def test_epub_is_a_valid_archive(finished):
         for line in opf.split("href=\"")[1:]:
             href = line.split('"', 1)[0]
             assert f"OEBPS/{href}" in names or href.startswith("http")
+
+
+def test_export_options_change_chapter_heading_and_validate(finished):
+    plan, chapters = finished
+    numbered = ExportOptions(chapter_heading="number")
+    title_only = ExportOptions(chapter_heading="title")
+    assert "### 1. " in to_markdown(plan, chapters, options=numbered)
+    assert "### Chapter 1." not in to_markdown(plan, chapters, options=numbered)
+    assert "### Chapter 1." not in to_markdown(plan, chapters, options=title_only)
+    assert "### " + plan.chapters[0].title in to_markdown(plan, chapters, options=title_only)
+    with pytest.raises(ValueError, match="page_size"):
+        ExportOptions(page_size="tabloid")
+    with pytest.raises(ValueError, match="margins"):
+        ExportOptions(margins="huge")
+
+
+def test_html_export_uses_selected_page_and_text_layout(finished):
+    plan, chapters = finished
+    options = ExportOptions(
+        page_size="letter", margins="wide", chapter_heading="number", body_font_size=12,
+        line_spacing="airy", paragraph_style="space", alignment="left",
+        chapter_new_page=False,
+    )
+    rendered = to_html(plan, chapters, options=options)
+    assert "@page { size:Letter; margin:25mm 25mm 25mm;" in rendered
+    assert "--body-size:12pt" in rendered and "--line-spacing:1.8" in rendered
+    assert "--paragraph-indent:0" in rendered and "--paragraph-gap:0.75em" in rendered
+    assert 'class="chapter page-break"' not in rendered
+    assert ">1.</div>" in rendered
+
+
+def test_epub_export_uses_typography_and_number_style(finished):
+    plan, chapters = finished
+    options = ExportOptions(
+        chapter_heading="number", body_font_size=12, line_spacing="airy",
+        paragraph_style="space", alignment="left", chapter_new_page=False,
+    )
+    data = to_epub(plan, chapters, options=options)
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        css = zf.read("OEBPS/style.css").decode()
+        chapter = zf.read("OEBPS/ch01.xhtml").decode()
+    assert "font-size: 12pt" in css and "line-height: 1.8" in css
+    assert "margin: 0 0 .75em; text-indent: 0" in css
+    assert "chapter-break" not in chapter
+    assert '<p class="chapter-num">1.</p>' in chapter
 
 
 def test_pdf_has_pages_and_text(finished):
@@ -827,6 +879,21 @@ def test_presets_expose_profiles_and_banned_limits():
     assert {p["id"] for p in payload["pov"]["options"]} == set(config.POVS)
     assert payload["review_outline"]["default"] is False
     assert payload["review_outline"]["browser_default"] is True
+
+
+def test_pdf_respects_page_size_and_running_matter_option(finished):
+    pymupdf = pytest.importorskip("pymupdf")
+    plan, chapters = finished
+    data, _, _ = export(
+        plan,
+        chapters,
+        "pdf",
+        options=ExportOptions(page_size="a4", running_matter=False, chapter_heading="title"),
+    )
+    pdf = pymupdf.open(stream=data, filetype="pdf")
+    assert abs(pdf[1].rect.width - 595.28) < 1
+    assert abs(pdf[1].rect.height - 841.89) < 1
+    assert "BOOKWRIGHT" not in pdf[1].get_text()
 
 
 def test_profile_expands_server_side_unless_overridden():

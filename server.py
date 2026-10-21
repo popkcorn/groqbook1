@@ -11,15 +11,16 @@ import logging
 import os
 import re
 from pathlib import Path
+from typing import Literal
 
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from bookwright import config
-from bookwright.exporters import export
+from bookwright.exporters import ExportOptions, export
 from bookwright.jobs import BookSpec, JobStore, estimate, run_book
 from bookwright.llm import GroqProvider
 from bookwright.mock import MockProvider
@@ -367,7 +368,19 @@ async def book_events(job_id: str) -> StreamingResponse:
 
 
 @app.get("/api/books/{job_id}/export/{fmt}")
-async def export_book(job_id: str, fmt: str) -> Response:
+async def export_book(
+    job_id: str,
+    fmt: str,
+    page_size: Literal["a5", "a4", "letter"] = "a5",
+    margins: Literal["narrow", "normal", "wide"] = "normal",
+    chapter_heading: Literal["chapter", "number", "title"] = "chapter",
+    body_font_size: int = Query(default=10, ge=9, le=14),
+    line_spacing: Literal["compact", "normal", "airy"] = "normal",
+    paragraph_style: Literal["indent", "space"] = "indent",
+    alignment: Literal["justify", "left"] = "justify",
+    chapter_new_page: bool = True,
+    running_matter: bool = True,
+) -> Response:
     job = store.get(job_id)
     if not job:
         raise HTTPException(404, "no such book")
@@ -383,9 +396,22 @@ async def export_book(job_id: str, fmt: str) -> Response:
     if not chapters:
         raise HTTPException(409, "no chapters have been written yet")
 
+    options = ExportOptions(
+        page_size=page_size,
+        margins=margins,
+        chapter_heading=chapter_heading,
+        body_font_size=body_font_size,
+        line_spacing=line_spacing,
+        paragraph_style=paragraph_style,
+        alignment=alignment,
+        chapter_new_page=chapter_new_page,
+        running_matter=running_matter,
+    )
     try:
         # PDF layout is CPU-bound; keep it off the event loop.
-        data, filename, media_type = await asyncio.to_thread(export, job.plan, chapters, fmt)
+        data, filename, media_type = await asyncio.to_thread(
+            export, job.plan, chapters, fmt, options=options
+        )
     except Exception as exc:
         log.exception("export failed (%s)", fmt)
         raise HTTPException(500, f"export failed: {exc}") from exc
