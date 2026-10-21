@@ -9,6 +9,12 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, dataclass
 
+from .env import load_env
+
+# Load `.env` before reading anything below, so `cp example.env .env` is
+# enough to configure the app. Real environment variables take precedence.
+load_env()
+
 # --------------------------------------------------------------------------- #
 # Models
 # --------------------------------------------------------------------------- #

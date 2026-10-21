@@ -266,3 +266,62 @@ def test_presets_payload_shape():
     assert payload["lengths"] and payload["tones"] and payload["audiences"]
     assert payload["models"]["architect"]
     assert json.dumps(payload)  # serialisable
+
+
+# --------------------------------------------------------------------------- #
+# .env loader and launcher ergonomics
+# --------------------------------------------------------------------------- #
+def test_env_loader_parses_quotes_and_comments(tmp_path, monkeypatch):
+    from bookwright.env import load_env
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# a comment\n"
+        'GROQ_API_KEY="gsk_test_quoted"\n'
+        "BOOKWRIGHT_WRITER_MODEL=openai/gpt-oss-20b  # inline note\n"
+        "MALFORMED LINE\n"
+        "\n"
+        "export BOOKWRIGHT_CONCURRENCY=2\n"
+    )
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("BOOKWRIGHT_WRITER_MODEL", raising=False)
+    applied = load_env(env_file)
+
+    assert applied["GROQ_API_KEY"] == "gsk_test_quoted"
+    assert applied["BOOKWRIGHT_WRITER_MODEL"] == "openai/gpt-oss-20b"
+    assert applied["BOOKWRIGHT_CONCURRENCY"] == "2"
+    assert "MALFORMED LINE" not in applied
+
+
+def test_real_environment_wins_over_env_file(tmp_path, monkeypatch):
+    from bookwright.env import load_env
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("GROQ_API_KEY=gsk_from_file\n")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_from_shell")
+
+    load_env(env_file)
+
+    import os
+    assert os.environ["GROQ_API_KEY"] == "gsk_from_shell"
+
+
+def test_missing_env_file_is_not_an_error(tmp_path):
+    from bookwright.env import load_env
+
+    assert load_env(tmp_path / "nope.env") == {}
+
+
+def test_launcher_exposes_expected_flags():
+    """run.py must stay runnable without importing third-party packages first."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        [sys.executable, "run.py", "--help"], cwd=root, capture_output=True, text=True, timeout=60
+    )
+    assert result.returncode == 0, result.stderr
+    for flag in ("--host", "--port", "--reload", "--no-browser", "--install"):
+        assert flag in result.stdout

@@ -50,40 +50,87 @@ cancellation never loses what was already written.
 
 ---
 
-## Quickstart
+## Run it on your own PC
+
+You need **Python 3.10 or newer** and a Groq API key (free at
+<https://console.groq.com/keys>). No key? It still runs in demo mode.
+
+### Windows
+
+1. Install Python from <https://www.python.org/downloads/windows/> and **tick
+   "Add python.exe to PATH"** in the installer.
+2. Download this repo (**Code → Download ZIP**, then extract) or clone it.
+3. Double-click **`start-windows.bat`**.
+
+On first run it creates a `.venv` folder and installs the dependencies (about a minute).
+Then it opens <http://localhost:8000> in your browser.
+
+### macOS / Linux
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements-bookwright.txt
-export GROQ_API_KEY=gsk_...          # optional — omit to run in demo mode
-uvicorn server:app --host 0.0.0.0 --port 8000
+git clone https://github.com/popkcorn/groqbook1.git
+cd groqbook1
+./start-mac-linux.sh
 ```
 
-Open <http://localhost:8000>. No key? It runs the **demo provider**: a deterministic local
-fixture that composes placeholder prose so the entire pipeline, streaming UI and exports can be
-exercised offline. Demo text is templated on purpose — it is a fixture, not writing.
+If the shell refuses to run it: `chmod +x start-mac-linux.sh` first.
 
-Docker:
+### Any OS, manually
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements-bookwright.txt
+python run.py
+```
+
+### Adding your API key
+
+Copy `example.env` to `.env` next to `run.py` and paste your key in:
+
+```
+GROQ_API_KEY=gsk_your_key_here
+```
+
+That is all — `run.py` loads `.env` automatically, no shell exports needed. A key
+exported in your shell overrides the file. You can also leave `.env` empty and paste the
+key in the browser via **API key** in the header (it stays in that tab only).
+
+### Launcher options
+
+```bash
+python run.py                  # http://127.0.0.1:8000, opens your browser
+python run.py --port 9000      # different port
+python run.py --reload         # restart on file changes (development)
+python run.py --host 0.0.0.0   # reachable from other devices on your LAN
+python run.py --no-browser     # do not open a browser
+python run.py --install        # install missing dependencies automatically
+```
+
+### If something goes wrong
+
+| Symptom | Fix |
+|---|---|
+| `Python was not found` (Windows) | Reinstall Python with "Add python.exe to PATH" ticked |
+| `error: externally-managed-environment` | Use a virtual environment (the `start-*` scripts do this for you) |
+| `port 8000 is already in use` | Another copy is running, or use `--port 8001` |
+| Browser shows demo prose | No key was found — check `.env` or use the **API key** button |
+| `401 Unauthorized` | The key is wrong or expired; regenerate it at console.groq.com |
+| `404` mentioning a model | Groq retired that model — check `console.groq.com/docs/deprecations`, then set `BOOKWRIGHT_WRITER_MODEL` in `.env` |
+
+Docker, if you prefer containers:
 
 ```bash
 docker build -t bookwright .
 docker run -p 8000:8000 -e GROQ_API_KEY=gsk_... bookwright
 ```
 
-### Using your own key from the browser
-
-Press **API key** in the header. The key is held in `sessionStorage` for that tab, sent as an
-`X-Groq-Key` header only with your own requests, and never written to disk or logged. Leave it
-empty to stay in demo mode. If the server has `GROQ_API_KEY` set, that key is used when the browser
-sends none.
-
----
-
 ## Layout
 
 ```
 bookwright/
   config.py      model routing, length presets, limits — the only place models are named
+  env.py         tiny .env reader, so `cp example.env .env` is enough to configure
   schema.py      Plan/Part/Chapter dataclasses + parse_plan() validation with repair
   prompts.py     every prompt, separated from transport so it can be reviewed
   llm.py         httpx client: SSE streaming, retry/backoff, usage accounting
@@ -92,7 +139,10 @@ bookwright/
   exporters.py   Markdown · HTML · EPUB 3 · PDF
 server.py        FastAPI: JSON API, SSE stream, export endpoints
 static/          dependency-free front-end (no build step, no CDN)
-tests/           20 tests: schema, pipeline, cancel, continuity, every exporter
+tests/           24 tests: schema, pipeline, cancel, continuity, env, exports
+run.py           standalone launcher: checks deps, loads .env, opens the browser
+start-windows.bat / start-mac-linux.sh
+                 double-click / one-command setup for a fresh machine
 main.py          the original Groqbook app, unchanged, for reference
 ```
 
@@ -150,7 +200,7 @@ Interactive docs: `/api/docs`.
 
 ```bash
 pip install -r requirements-bookwright.txt pytest pymupdf ruff
-BOOKWRIGHT_MOCK_DELAY=0 pytest -q      # 20 tests, no network, no key
+BOOKWRIGHT_MOCK_DELAY=0 pytest -q      # 24 tests, no network, no key
 ruff check bookwright server.py
 ```
 
