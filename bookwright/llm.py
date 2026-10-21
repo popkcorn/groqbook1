@@ -75,6 +75,11 @@ class Provider(Protocol):
     ) -> AsyncIterator[dict]:
         ...
 
+    async def rewrite_chunk(
+        self, *, chunk: str, findings: str, rules: str, chapter: Chapter
+    ) -> tuple[str, Usage]:
+        ...
+
     async def summarize(self, *, chapter: Chapter, text: str) -> tuple[dict, Usage]:
         ...
 
@@ -142,6 +147,44 @@ class GroqProvider:
             hint = " — the model ID may have been retired; see console.groq.com/docs/deprecations"
         return LLMError(f"Groq returned {status}: {message}{hint}", status=status,
                         retryable=status in RETRYABLE_STATUS)
+
+    async def _complete_text(
+        self, messages, *, model, max_tokens, temperature=0.2
+    ) -> tuple[str, Usage]:
+        payload = self._payload(
+            messages, model=model, max_tokens=max_tokens, temperature=temperature,
+            json_mode=False, stream=False,
+        )
+        last: LLMError | None = None
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            started = time.perf_counter()
+            try:
+                resp = await self._client.post(
+                    f"{self._base_url}/chat/completions", headers=self._headers, json=payload
+                )
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last = LLMError(f"network error talking to Groq: {exc}", retryable=True)
+            else:
+                if resp.status_code >= 400:
+                    last = self._error_from(resp.status_code, resp.content)
+                    if not last.retryable:
+                        raise last
+                else:
+                    data = resp.json()
+                    raw_usage = data.get("usage") or {}
+                    choice = (data.get("choices") or [{}])[0]
+                    content = ((choice.get("message") or {}).get("content") or "").strip()
+                    usage = Usage(
+                        prompt_tokens=int(raw_usage.get("prompt_tokens") or 0),
+                        completion_tokens=int(raw_usage.get("completion_tokens") or 0),
+                        elapsed=time.perf_counter() - started,
+                    )
+                    if not content:
+                        raise LLMError("Groq returned an empty rewrite")
+                    return content, usage
+            if attempt < MAX_ATTEMPTS:
+                await asyncio.sleep(_backoff(attempt, None))
+        raise last or LLMError("Groq request failed")
 
     async def _complete_json(self, messages, *, model, max_tokens, temperature=0.3) -> tuple[dict, Usage]:
         payload = self._payload(
@@ -300,6 +343,21 @@ class GroqProvider:
             if finish != "length":
                 break
         yield {"type": "usage", "usage": usage}
+
+    async def rewrite_chunk(
+        self, *, chunk: str, findings: str, rules: str, chapter: Chapter
+    ) -> tuple[str, Usage]:
+        from . import prompts
+
+        messages = prompts.stylist_messages(
+            chunk=chunk, findings_text=findings, rules_text=rules, chapter=chapter
+        )
+        return await self._complete_text(
+            messages,
+            model=self.editor_model,
+            max_tokens=config.writer_tokens_for(len(chunk.split())),
+            temperature=0.2,
+        )
 
     async def summarize(self, *, chapter: Chapter, text: str) -> tuple[dict, Usage]:
         from . import prompts

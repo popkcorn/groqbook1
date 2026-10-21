@@ -70,6 +70,24 @@
         <p class="hint panel-hint">Switch off the patterns you don't want in the prose. These go
           into every chapter prompt and are repeated in the continuity bible.</p>
         <div class="toggles" id="anti-patterns"></div>
+        <div class="stylist-row">
+          <label class="toggle stylist-toggle">
+            <input type="checkbox" id="stylist-on" checked>
+            <span class="t-label">Editorial de-AI pass
+              <span class="t-desc">After each chapter is drafted, scan it and rewrite only the passages
+                that still break the rules above. Rejected if the rewrite loses meaning, length or fails
+                to reduce the flags.</span>
+            </span>
+          </label>
+          <label class="mini stylist-strength">
+            <span>Strength</span>
+            <select id="stylist-strength">
+              <option value="light">Light — 3+ flags</option>
+              <option value="full">Full — any flag</option>
+            </select>
+          </label>
+        </div>
+
         <label class="field extra-field">
           <span class="label">House style (optional)</span>
           <textarea id="extra-instructions" rows="2" maxlength="400"

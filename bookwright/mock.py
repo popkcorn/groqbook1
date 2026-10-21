@@ -162,6 +162,15 @@ def compose_chapter(topic: str, chapter: Chapter, target_words: int) -> str:
             )
         if b_i == 2:
             paras.append("> " + _fill(PULL_QUOTES[(rnd + b_i) % len(PULL_QUOTES)], topic))
+        if b_i == 0:
+            # Deliberate machine-flavoured seam, so the editorial pass has
+            # something real to fix in demo mode. Live models produce their own.
+            paras.append(
+                f"It is worth noting that {topic} is not just a technique — it is a way of "
+                "seeing. In today's fast-paced world, we must delve into the complexities of "
+                "the landscape, arguably unlocking the secrets of a tapestry that is, "
+                "at the end of the day, clear, concise, and compelling."
+            )
         blocks.extend(paras)
         word_count += sum(len(p.split()) for p in paras)
         b_i += 1
@@ -178,6 +187,17 @@ def _heading_for(beat: str, i: int) -> str:
     if not stub:
         stub = f"Point {i + 1}"
     return _sentence_case(stub)
+
+
+def _tidy(text: str) -> str:
+    """Repair the grammar a regex leaves behind."""
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\s+([,.;:])", r"\1", text)
+    text = re.sub(r"(?<=[.!?])\s+([a-z])", lambda m: " " + m.group(1).upper(), text)
+    text = re.sub(r"(?<=[a-z])\s*\.\s*\.", ".", text)
+    text = re.sub(r"\bNote that The\b", "The", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 class MockProvider:
@@ -261,6 +281,62 @@ class MockProvider:
                 elapsed=elapsed,
             ),
         }
+
+    async def rewrite_chunk(
+        self, *, chunk: str, findings: str, rules: str, chapter: Chapter
+    ) -> tuple[str, Usage]:
+        """Apply the active style rules mechanically.
+
+        Not an editor — a filter. It exists so the de-AI stage is observable
+        offline and so tests can assert that flags measurably fall.
+        """
+        text = chunk
+
+        # The injected seam paragraph is replaced wholesale: a regex filter can
+        # strip a phrase but cannot repair the grammar around it.
+        seam = re.compile(
+            r"It is worth noting that.*?clear, concise, and compelling\.",
+            re.IGNORECASE | re.DOTALL,
+        )
+        if seam.search(text):
+            text = seam.sub(
+                f"The argument is not decoration. {chapter.title} is a way of seeing, "
+                "and the seeing takes practice.",
+                text,
+            )
+
+        replacements = [
+            (r"\bdelve[sd]? into\b", "examine"),
+            (r"\bdelve[sd]?\b", "examine"),
+            (r"\bIn today'?s fast-paced world,?\s*", ""),
+            (r"\bat the end of the day,?\s*", ""),
+            (r"\bIt is worth noting that\b", "Note that"),
+            (r"\bit is worth noting\b", "notably"),
+            (r"\bunlocking the secrets of\b", "mapping"),
+            (r"\ba tapestry that is\b", "a picture"),
+            (r"\bthe landscape\b", "the situation"),
+            (r"\barguably\b", ""),
+            (r"\bIn this chapter,?\s*", ""),
+            (r"\bAs we have seen,?\s*", ""),
+            (r"\bclear, concise, and compelling\b", "clear"),
+            (r"\bnot just\b([^.!?]{0,60}?),?\s*but\b", r"not merely\1, but"),
+        ]
+        for pattern, replacement in replacements:
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        if "at most one em dash" in rules:
+            text = text.replace(" — ", ", ").replace("—", ", ")
+        if "Do not address the reader as 'you'" in rules:
+            text = re.sub(r"\byou\b", "one", text, flags=re.IGNORECASE)
+            text = re.sub(r"\byour\b", "one's", text, flags=re.IGNORECASE)
+
+        text = _tidy(text)
+        await asyncio.sleep(0.05)
+        usage = Usage(
+            prompt_tokens=len(chunk.split()) + 150,
+            completion_tokens=len(text.split()),
+            elapsed=0.05,
+        )
+        return text, usage
 
     async def summarize(self, *, chapter: Chapter, text: str) -> tuple[dict, Usage]:
         await asyncio.sleep(0.12)

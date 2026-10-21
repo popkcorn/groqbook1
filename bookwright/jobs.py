@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from . import config, prompts
+from . import style as stylemod
 from .llm import LLMError, Provider, Usage
 from .schema import Plan, PlanError, parse_plan
 
@@ -35,6 +36,8 @@ class BookSpec:
     extra_instructions: str = ""
     chapters_override: int | None = None
     words_override: int | None = None
+    stylist: bool = config.STYLIST_DEFAULT
+    stylist_strength: str = config.DEFAULT_STYLIST_STRENGTH
 
     @property
     def length(self) -> config.LengthPreset:
@@ -80,6 +83,8 @@ class BookSpec:
             "words_per_chapter": self.length.words_per_chapter,
             "directives": self.clean_directives(),
             "extra_instructions": self.extra_instructions,
+            "stylist": self.stylist,
+            "stylist_strength": self.stylist_strength,
         }
 
 
@@ -162,6 +167,12 @@ class Job:
                     "status": state["status"],
                     "summary": state.get("summary", ""),
                     "words": len(state["text"].split()),
+                    "original": state.get("original"),
+                    "style_before": state.get("style_before"),
+                    "style_after": state.get("style_after"),
+                    "diff": stylemod.paragraph_diff(state["original"], state["text"])
+                    if state.get("original")
+                    else None,
                 }
                 for index, state in sorted(self.chapters.items())
             ],
@@ -260,6 +271,9 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
                 "text": "",
                 "status": "pending",
                 "summary": "",
+                "original": None,
+                "style_before": None,
+                "style_after": None,
             }
         job.emit({"type": "plan", "plan": plan.to_dict(), "stats": job.stats()})
 
@@ -288,7 +302,8 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
             results = await asyncio.gather(
                 *(
                     _write_chapter(
-                        job, provider, plan, chapter, part_of[chapter.index], bible, spec.style
+                        job, provider, plan, chapter, part_of[chapter.index], bible,
+                        spec.style, spec,
                     )
                     for chapter in wave
                 ),
@@ -375,6 +390,7 @@ async def _write_chapter(
     part_title: str,
     bible: str,
     style: str = "",
+    spec: BookSpec | None = None,
 ) -> None:
     state = job.chapters[chapter.index]
     state["status"] = "writing"
@@ -402,11 +418,21 @@ async def _write_chapter(
     if not text:
         raise LLMError("model returned an empty chapter")
     state["text"] = text
-    state["status"] = "done"
     job.emit({
         "type": "chapter_written",
         "index": chapter.index,
         "words": len(text.split()),
+        "stats": job.stats(),
+    })
+
+    if spec is not None and spec.stylist:
+        await _deai_chapter(job, provider, chapter, spec)
+
+    state["status"] = "done"
+    job.emit({
+        "type": "chapter_drafted",
+        "index": chapter.index,
+        "words": len(state["text"].split()),
         "stats": job.stats(),
     })
 
@@ -428,3 +454,116 @@ def estimate(spec: BookSpec) -> dict[str, Any]:
         "total_tokens": total_in + total_out,
         "review_note": "estimate only; actual usage is reported per chapter",
     }
+
+
+# --------------------------------------------------------------------------- #
+# De-AI editorial pass
+# --------------------------------------------------------------------------- #
+def chunk_text(text: str, max_chars: int = config.STYLIST_CHUNK_CHARS) -> list[str]:
+    """Split on blank lines into chunks small enough to rewrite safely."""
+    paragraphs = [p for p in text.split("\n\n") if p.strip()]
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for paragraph in paragraphs:
+        if size and size + len(paragraph) > max_chars:
+            chunks.append("\n\n".join(current))
+            current, size = [], 0
+        current.append(paragraph)
+        size += len(paragraph) + 2
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks[: config.STYLIST_MAX_CHUNKS]
+
+
+async def _deai_chapter(job: Job, provider: Provider, chapter, spec: BookSpec) -> None:
+    """Scan the chapter, rewrite flagged passages, keep the result only if it improved.
+
+    Three guards make this safe to run unattended:
+      * nothing happens when the scan is clean, or below the strength threshold;
+      * a rewrite outside the length tolerance is discarded;
+      * a rewrite that does not reduce the flag count is discarded.
+    The original is always kept so the UI can show a diff.
+    """
+    state = job.chapters[chapter.index]
+    original = state["text"]
+    rules = spec.clean_directives()
+    if not rules:
+        return
+
+    before = stylemod.scan(original, rules)
+    before_total = stylemod.total(before)
+    threshold = config.STYLIST_STRENGTHS.get(spec.stylist_strength, 3)
+    if before_total < threshold:
+        state["style_before"] = before_total
+        state["style_after"] = before_total
+        return
+
+    job.emit({
+        "type": "stylist_start",
+        "index": chapter.index,
+        "flags": before_total,
+        "rules": [f.rule for f in before],
+    })
+
+    rules_text = prompts.style_block(rules)
+    rewritten: list[str] = []
+    usage = Usage()
+    for chunk in chunk_text(original):
+        flagged = stylemod.scan(chunk, rules)
+        if stylemod.total(flagged) < 1:
+            rewritten.append(chunk)
+            continue
+        try:
+            text, chunk_usage = await provider.rewrite_chunk(
+                chunk=chunk,
+                findings=stylemod.bullet_report(flagged),
+                rules=rules_text,
+                chapter=chapter,
+            )
+        except Exception as exc:  # noqa: BLE001 - an editorial pass must never sink a book
+            log.warning("stylist failed on chapter %s: %s", chapter.index, exc)
+            rewritten.append(chunk)
+            continue
+        usage.merge(chunk_usage)
+        rewritten.append(text.strip())
+    _merge(job, usage)
+
+    candidate = "\n\n".join(part for part in rewritten if part).strip()
+    if not candidate:
+        return
+
+    low, high = config.STYLIST_LENGTH_TOLERANCE
+    ratio = stylemod.length_ratio(original, candidate)
+    if not low <= ratio <= high:
+        job.emit({
+            "type": "stylist_rejected",
+            "index": chapter.index,
+            "reason": f"length changed by {round((ratio - 1) * 100)}%",
+        })
+        return
+
+    after = stylemod.scan(candidate, rules)
+    after_total = stylemod.total(after)
+    if after_total >= before_total:
+        job.emit({
+            "type": "stylist_rejected",
+            "index": chapter.index,
+            "reason": "rewrite did not reduce the flagged patterns",
+        })
+        return
+
+    state["original"] = original
+    state["text"] = candidate
+    state["style_before"] = before_total
+    state["style_after"] = after_total
+    job.emit({
+        "type": "stylist_done",
+        "index": chapter.index,
+        "text": candidate,
+        "before": before_total,
+        "after": after_total,
+        "words": len(candidate.split()),
+        "diff": stylemod.paragraph_diff(original, candidate),
+        "stats": job.stats(),
+    })

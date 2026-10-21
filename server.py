@@ -51,6 +51,8 @@ class BookRequest(BaseModel):
     )
     directives: list[str] = Field(default_factory=lambda: list(config.DEFAULT_DIRECTIVES))
     extra_instructions: str = Field(default="", max_length=config.MAX_EXTRA_INSTRUCTIONS)
+    stylist: bool = config.STYLIST_DEFAULT
+    stylist_strength: str = config.DEFAULT_STYLIST_STRENGTH
 
     @field_validator("topic")
     @classmethod
@@ -74,6 +76,13 @@ class BookRequest(BaseModel):
         if unknown:
             raise ValueError(f"unknown style directive(s): {', '.join(unknown)}")
         return list(dict.fromkeys(value))
+
+    @field_validator("stylist_strength")
+    @classmethod
+    def _known_strength(cls, value: str) -> str:
+        if value not in config.STYLIST_STRENGTHS:
+            raise ValueError(f"stylist_strength must be one of {sorted(config.STYLIST_STRENGTHS)}")
+        return value
 
     @field_validator("extra_instructions")
     @classmethod
@@ -144,6 +153,8 @@ async def create_book(payload: BookRequest, request: Request) -> JSONResponse:
         extra_instructions=payload.extra_instructions,
         chapters_override=payload.chapters,
         words_override=payload.words_per_chapter,
+        stylist=payload.stylist,
+        stylist_strength=payload.stylist_strength,
     )
     provider = _provider(api_key)
     job = store.create(spec, provider)

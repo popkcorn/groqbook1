@@ -251,6 +251,18 @@
       updateEstimate(presets);
     });
 
+    const stylistOn = $("#stylist-on");
+    const stylistStrength = $("#stylist-strength");
+    if (presets.stylist) {
+      stylistOn.checked = Boolean(presets.stylist.default);
+      stylistStrength.value = presets.stylist.default_strength || "light";
+    }
+    stylistOn.addEventListener("change", () => {
+      stylistStrength.disabled = !stylistOn.checked;
+      updateEstimate(presets);
+    });
+    stylistStrength.addEventListener("change", () => updateEstimate(presets));
+
     updateEstimate(presets);
   }
 
@@ -268,6 +280,7 @@
     if (state.directives.length) styleBits.push(`${state.directives.length} style rules`);
     const extra = $("#extra-instructions").value.trim();
     if (extra) styleBits.push("house style");
+    if ($("#stylist-on").checked) styleBits.push("de-AI pass");
     const suffix = styleBits.length ? ` · ${styleBits.join(" + ")}` : "";
     const words = compact(p.total_words);
     $("#estimate").textContent = state.key
@@ -338,6 +351,8 @@
       payload.chapters = Number($("#c-chapters").value);
       payload.words_per_chapter = Number($("#c-words").value);
     }
+    payload.stylist = $("#stylist-on").checked;
+    payload.stylist_strength = $("#stylist-strength").value;
     return payload;
   }
 
@@ -406,6 +421,34 @@
       setChapterStatus(data.index, "done", data.words);
       renderChapter(data.index, true);
       applyStats(data.stats);
+    });
+
+    stream.addEventListener("stylist_start", (e) => {
+      const data = JSON.parse(e.data);
+      setStatus(`Editing chapter ${data.index} — ${data.flags} pattern${data.flags === 1 ? "" : "s"} flagged`);
+      const chapter = state.chapters.get(data.index);
+      if (chapter && chapter.footNode) {
+        const fixes = el("span", "fixes", "editing…");
+        chapter.footNode.querySelector(".fixes")?.remove();
+        chapter.footNode.prepend(fixes);
+      }
+    });
+
+    stream.addEventListener("stylist_done", (e) => {
+      const data = JSON.parse(e.data);
+      const chapter = state.chapters.get(data.index);
+      if (!chapter) return;
+      chapter.original = chapter.original || chapter.text;
+      if (data.text) chapter.text = data.text;
+      chapter.diff = data.diff || null;
+      chapter.fixes = Math.max(0, (data.before || 0) - (data.after || 0));
+      renderChapter(data.index, true);
+      applyStats(data.stats);
+    });
+
+    stream.addEventListener("stylist_rejected", (e) => {
+      const data = JSON.parse(e.data);
+      toast(`Editorial pass skipped chapter ${data.index}: ${data.reason}`, 7000);
     });
 
     stream.addEventListener("chapter_done", (e) => {
@@ -495,6 +538,9 @@
         local.text = chapter.text;
         local.status = chapter.status;
         local.summary = chapter.summary || "";
+        local.original = chapter.original || null;
+        local.diff = chapter.diff || null;
+        local.fixes = Math.max(0, (chapter.style_before || 0) - (chapter.style_after || 0));
         renderChapter(chapter.index, true);
       }
       paintToc();
@@ -518,7 +564,11 @@
       if (title) state.chapters.get(index).title = title;
       return state.chapters.get(index);
     }
-    const chapter = { index, title: title || `Chapter ${index}`, text: "", status: "pending", summary: "", words: 0, node: null, bodyNode: null };
+    const chapter = {
+      index, title: title || `Chapter ${index}`, text: "", status: "pending", summary: "",
+      words: 0, node: null, bodyNode: null,
+      original: null, diff: null, fixes: 0, diffOpen: false,
+    };
     state.chapters.set(index, chapter);
     return chapter;
   }
@@ -619,9 +669,52 @@
     if (!chapter || !chapter.bodyNode) return;
     const html = mdToHtml(chapter.text);
     const caret = final || chapter.status !== "writing" ? "" : '<span class="caret"></span>';
-    chapter.bodyNode.innerHTML = html + caret;
+    chapter.bodyNode.innerHTML = html + caret + (chapter.diffOpen ? diffHtml(chapter) : "");
     chapter.node?.classList.toggle("pending", false);
+    paintChapterFoot(chapter);
   }
+
+  function paintChapterFoot(chapter) {
+    const foot = chapter.footNode;
+    if (!foot) return;
+    foot.querySelector(".fixes")?.remove();
+    foot.querySelector(".diff-btn")?.remove();
+    if (chapter.fixes > 0) {
+      foot.prepend(el("span", "fixes", `${chapter.fixes} de-AI fix${chapter.fixes === 1 ? "" : "es"}`));
+    }
+    if (chapter.diff) {
+      const btn = el("button", "diff-btn", chapter.diffOpen ? "Hide changes" : "See changes");
+      btn.type = "button";
+      btn.addEventListener("click", () => {
+        chapter.diffOpen = !chapter.diffOpen;
+        renderChapter(chapter.index, true);
+      });
+      foot.prepend(btn);
+    }
+  }
+
+  function diffHtml(chapter) {
+    const parts = ['<div class="diff"><p class="diff-note">What the editorial pass changed. Unchanged paragraphs are hidden.</p>'];
+    let shown = 0;
+    for (const op of chapter.diff) {
+      if (op.op === "change") {
+        shown++;
+        parts.push(
+          `<div class="pair"><p class="del">${escapeText(op.before)}</p>` +
+          `<p class="ins">${escapeText(op.after)}</p></div>`
+        );
+      } else if (op.op === "del") {
+        for (const p of op.before) { shown++; parts.push(`<div class="pair"><p class="del">${escapeText(p)}</p></div>`); }
+      } else if (op.op === "ins") {
+        for (const p of op.after) { shown++; parts.push(`<div class="pair"><p class="ins">${escapeText(p)}</p></div>`); }
+      }
+    }
+    if (!shown) parts.push('<p class="diff-note">No paragraph-level changes.</p>');
+    parts.push("</div>");
+    return parts.join("");
+  }
+
+  const escapeText = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   function paintToc() {
     if (!state.plan) return;

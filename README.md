@@ -205,6 +205,52 @@ curl -X POST localhost:8000/api/books -H 'content-type: application/json' -d '{
 }'
 ```
 
+## The de-AI editorial pass
+
+Prompt instructions reduce machine-flavoured prose but cannot verify it. So after a chapter is
+drafted, a fourth stage measures it and rewrites only what still breaks the rules.
+
+```
+draft ──▶ SCAN ──▶ rewrite flagged passages ──▶ RE-SCAN ──▶ keep or discard ──▶ diff
+         (regex +     (editor model,             (same rules)   (three guards)
+          structure)   chunk by chunk)
+```
+
+**Scan** (`bookwright/style.py`) is deliberately literal. Each active rule has a detector that
+matches something nameable — stock phrases, em dashes, hedges, recaps — and reports the offending
+excerpts. Two structural checks are computed rather than matched: runs of four same-length
+sentences, and bullet-point prose over eight items.
+
+**Rewrite** only touches chunks that contain a flag, so a clean chapter costs nothing. Chunks are
+split on paragraph boundaries (~5,000 chars) and capped at eight per chapter.
+
+**Three guards** decide whether the result ships:
+
+| Guard | Rule | On failure |
+|---|---|---|
+| Length | result within 60–160% of the draft | `stylist_rejected`, draft kept |
+| Effect | re-scan shows fewer flags than before | `stylist_rejected`, draft kept |
+| Survival | any error in the editor call | draft kept, warning logged |
+
+A chapter is never lost to the editorial pass, and the draft is retained as `original` so the UI can
+show exactly what changed. Detection also only polices the rules **you enabled** — turning off
+"Stock phrases" both stops the instruction and stops the check.
+
+In the app: **Editorial de-AI pass** toggles it (on by default), with `Light` (3+ flags) or `Full`
+(any flag) strength. Each edited chapter shows a *"7 de-AI fixes"* badge and a **See changes**
+button that opens a paragraph-level before/after diff. Unchanged paragraphs are hidden.
+
+```bash
+curl -X POST localhost:8000/api/books -H 'content-type: application/json' -d '{
+  "topic": "why maintenance is the real design problem",
+  "length": "standard",
+  "stylist": true, "stylist_strength": "full"
+}'
+```
+
+Cost: one extra editor-model call per flagged chunk, usually one per chapter. `light` skips
+chapters with fewer than three flags, which is most of them on a capable model.
+
 ## Layout
 
 ```
@@ -215,11 +261,12 @@ bookwright/
   prompts.py     every prompt, separated from transport so it can be reviewed
   llm.py         httpx client: SSE streaming, retry/backoff, usage accounting
   mock.py        offline fixture provider
-  jobs.py        job state, event fan-out, the wave-based pipeline
+  jobs.py        job state, event fan-out, the wave-based pipeline, the de-AI stage
+  style.py       pattern detectors, chunking, paragraph diff for the UI
   exporters.py   Markdown · HTML · EPUB 3 · PDF
 server.py        FastAPI: JSON API, SSE stream, export endpoints
 static/          dependency-free front-end (no build step, no CDN)
-tests/           34 tests: schema, pipeline, cancel, continuity, env, style, exports
+tests/           64 tests: schema, pipeline, cancel, continuity, env, style, exports
 run.py           standalone launcher: checks deps, loads .env, opens the browser
 start-windows.bat / start-mac-linux.sh
                  double-click / one-command setup for a fresh machine
@@ -236,7 +283,7 @@ main.py          the original Groqbook app, unchanged, for reference
 | `GET` | `/api/presets` | Lengths, tones, audiences, limits |
 | `POST` | `/api/books` | Start a book; returns `id` + token estimate |
 | `GET` | `/api/books/{id}` | Full snapshot (plan, chapters, stats) |
-| `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `chapter_done`, `done`, `error` |
+| `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `stylist_start`, `stylist_done`, `stylist_rejected`, `chapter_drafted`, `chapter_done`, `done`, `error` |
 | `POST` | `/api/books/{id}/cancel` | Stop; keeps what was written |
 | `GET` | `/api/books/{id}/export/{md\|html\|epub\|pdf}` | Download |
 
@@ -274,6 +321,8 @@ Interactive docs: `/api/docs`.
 - No auth or per-user quota. Run it for yourself or behind your own gateway.
 - Content is model output. Quality depends entirely on the routed models, and claims should be
   verified before anyone relies on them.
+- The de-AI pass fixes surface patterns, not substance. It cannot add evidence, fix a wrong claim,
+  or improve an argument — by design, it is forbidden from rewriting anything but flagged sentences.
 - Long books are slow by design: chapters run in waves of 3 and each wave waits for its
   summaries before the next starts. An Epic (20 chapters) is roughly seven waves.
 - The continuity window carries 10 chapter summaries. Past ~14 chapters the earliest ones fall
@@ -284,7 +333,7 @@ Interactive docs: `/api/docs`.
 
 ```bash
 pip install -r requirements-bookwright.txt pytest pymupdf ruff
-BOOKWRIGHT_MOCK_DELAY=0 pytest -q      # 34 tests, no network, no key
+BOOKWRIGHT_MOCK_DELAY=0 pytest -q      # 64 tests, no network, no key
 ruff check bookwright server.py
 ```
 

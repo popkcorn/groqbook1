@@ -183,6 +183,42 @@ def chapter_messages(
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+def stylist_messages(
+    *,
+    chunk: str,
+    findings_text: str,
+    rules_text: str,
+    chapter: Chapter,
+) -> list[dict]:
+    """The editorial rewrite prompt.
+
+    Everything here derives from the text that was actually produced: the
+    offending excerpts, then the rules, then hard constraints on what may not
+    change.
+    """
+    system = (
+        "You are a line editor removing patterns that make prose read as machine-generated. "
+        "You do not improve arguments, reorganise sections, or add material.\n\n"
+        "Your job:\n"
+        "1. Rewrite only the sentences containing the flagged patterns.\n"
+        "2. Keep every claim, example and fact. Keep the paragraph order.\n"
+        "3. Keep all Markdown headings exactly as they are.\n"
+        "4. Stay within 10% of the original length.\n"
+        "5. Where a flagged phrase carries no information, delete it rather than paraphrase it.\n"
+        "6. Do not introduce new patterns from the list below while fixing old ones.\n\n"
+        "Rules in force:\n"
+        f"{rules_text}\n"
+    )
+    user = (
+        f"# Chapter: {chapter.title}\n\n"
+        f"## Flagged in this passage\n{findings_text or '- (keep as is)'}\n\n"
+        "## Passage to edit\n"
+        f"{chunk}\n\n"
+        "Return the edited passage only. No commentary, no code fence, no headings added."
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
 def summary_messages(*, chapter: Chapter, text: str) -> list[dict]:
     system = (
         "You maintain continuity notes for a book. Return one JSON object:\n"

@@ -176,6 +176,17 @@ ANTI_PATTERNS: dict[str, tuple[str, str]] = {
     ),
 }
 
+# --- De-AI editorial pass ------------------------------------------------- #
+# After a chapter is drafted, scan it for the active rules and rewrite only the
+# offending passages. "light" touches chunks with a handful of flags; "full"
+# rewrites any chunk with at least one.
+STYLIST_DEFAULT = True
+STYLIST_STRENGTHS = {"light": 3, "full": 1}  # strength -> minimum flags to act
+DEFAULT_STYLIST_STRENGTH = "light"
+STYLIST_CHUNK_CHARS = 5_000
+STYLIST_MAX_CHUNKS = 8
+STYLIST_LENGTH_TOLERANCE = (0.6, 1.6)  # reject rewrites outside this ratio
+
 # Sensible default: the tics that most reliably read as machine-written.
 DEFAULT_DIRECTIVES = ["cliches", "not_just", "hedging", "summarising", "uniform_rhythm"]
 MAX_DIRECTIVES = len(ANTI_PATTERNS)
@@ -218,6 +229,11 @@ def presets_payload() -> dict:
             for key, (label, instruction) in ANTI_PATTERNS.items()
         ],
         "default_directives": DEFAULT_DIRECTIVES,
+        "stylist": {
+            "default": STYLIST_DEFAULT,
+            "strengths": list(STYLIST_STRENGTHS),
+            "default_strength": DEFAULT_STYLIST_STRENGTH,
+        },
         "defaults": {"length": DEFAULT_LENGTH, "tone": DEFAULT_TONE, "audience": AUDIENCES[0]},
         "models": {"architect": ARCHITECT_MODEL, "writer": WRITER_MODEL, "editor": EDITOR_MODEL},
         "limits": {
