@@ -20,7 +20,7 @@ from bookwright.exporters import (
     to_markdown,
 )
 from bookwright.jobs import BookSpec, Job, chunk_text, estimate, run_book
-from bookwright.llm import Usage
+from bookwright.llm import GroqProvider, Usage, _backoff
 from bookwright.mock import MockProvider
 from bookwright.prompts import chapter_regeneration_messages
 from bookwright.schema import Plan, PlanError, parse_plan
@@ -207,6 +207,58 @@ def test_estimate_positive():
     assert est["chapters"] == 6
     assert est["prompt_tokens"] > 0 and est["completion_tokens"] > 0
 
+
+
+def test_groq_429_uses_retry_after_header_and_body_hint(monkeypatch):
+    provider = object.__new__(GroqProvider)
+    body = json.dumps({"error": {"message": "Please try again in 23.955s."}}).encode()
+
+    header_error = provider._error_from(429, body, {"retry-after": "12"})
+    assert header_error.retryable
+    assert header_error.retry_after == 12
+    assert _backoff(1, header_error.retry_after) == 12
+
+    body_error = provider._error_from(429, body, {})
+    assert body_error.retry_after == 23.955
+    assert _backoff(1, body_error.retry_after) == 23.955
+
+    class Response:
+        def __init__(self, status, content, headers=None):
+            self.status_code = status
+            self.content = content
+            self.headers = headers or {}
+
+        def json(self):
+            return json.loads(self.content)
+
+    class FakeClient:
+        def __init__(self):
+            self.responses = [
+                Response(429, body, {"retry-after": "23.955"}),
+                Response(
+                    200,
+                    json.dumps({
+                        "choices": [{"message": {"content": "recovered"}}],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                    }).encode(),
+                ),
+            ]
+
+        async def post(self, *args, **kwargs):
+            return self.responses.pop(0)
+
+    delays = []
+
+    async def record_sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr("bookwright.llm.asyncio.sleep", record_sleep)
+    provider._base_url = "https://example.test"
+    provider._api_key = "gsk_test"
+    provider._client = FakeClient()
+    result, _ = asyncio.run(provider._complete_text([], model="test", max_tokens=1))
+    assert result == "recovered"
+    assert delays == [23.955]
 
 
 def test_chapter_regeneration_prompt_is_targeted():

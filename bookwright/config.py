@@ -385,7 +385,9 @@ MAX_CHAPTERS = 20
 
 MAX_BEATS = 6
 MAX_BEAT_CHARS = 320
-CONCURRENCY = max(1, int(os.environ.get("BOOKWRIGHT_CONCURRENCY", "3")))
+# Keep the default below Groq's common on-demand TPM ceiling; users can lower
+# it further in `.env` for stricter organization limits.
+CONCURRENCY = max(1, int(os.environ.get("BOOKWRIGHT_CONCURRENCY", "2")))
 
 # How many completed chapter summaries are carried into the next prompt.
 # Wider books need a wider window or the first chapters fall out of context.

@@ -10,9 +10,12 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Protocol
 
 import httpx
@@ -53,10 +56,18 @@ class Usage:
 
 
 class LLMError(RuntimeError):
-    def __init__(self, message: str, *, status: int | None = None, retryable: bool = False):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        retryable: bool = False,
+        retry_after: float | None = None,
+    ):
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+        self.retry_after = retry_after
 
 
 class Provider(Protocol):
@@ -102,10 +113,30 @@ MAX_ATTEMPTS = 4
 
 
 def _backoff(attempt: int, retry_after: float | None) -> float:
-    if retry_after:
-        return min(retry_after, 20.0)
+    if retry_after is not None:
+        # Respect the provider's minimum delay (Groq may report a token-window
+        # reset around 24 seconds); only cap pathological values at one hour.
+        return min(max(retry_after, 0.1), 3_600.0)
     # Jitter only: this never needs to be unpredictable, just spread out.
     return min(0.8 * (2 ** (attempt - 1)) + random.uniform(0, 0.4), 12.0)  # noqa: S311
+
+
+def _retry_after_seconds(headers, message: str) -> float | None:
+    """Read Retry-After or Groq's human-readable reset hint."""
+    raw = (headers or {}).get("retry-after", "").strip()
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            try:
+                reset_at = parsedate_to_datetime(raw)
+                if reset_at.tzinfo is None:
+                    reset_at = reset_at.replace(tzinfo=UTC)
+                return max(0.0, (reset_at - datetime.now(UTC)).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                pass
+    match = re.search(r"(?:try again in|retry after)\s+(\d+(?:\.\d+)?)\s*(?:s|sec(?:ond)?s?)", message, re.I)
+    return float(match.group(1)) if match else None
 
 
 class GroqProvider:
@@ -144,19 +175,24 @@ class GroqProvider:
             payload["response_format"] = {"type": "json_object"}
         return payload
 
-    def _error_from(self, status: int, body: bytes) -> LLMError:
+    def _error_from(self, status: int, body: bytes, headers=None) -> LLMError:
         try:
             data = json.loads(body)
             message = data.get("error", {}).get("message") or data.get("message") or body[:300]
         except (json.JSONDecodeError, AttributeError, TypeError):
             message = body[:300].decode("utf-8", "replace")
+        message = str(message)
         hint = ""
         if status == 401:
             hint = " — check the API key"
         elif status == 404:
             hint = " — the model ID may have been retired; see console.groq.com/docs/deprecations"
-        return LLMError(f"Groq returned {status}: {message}{hint}", status=status,
-                        retryable=status in RETRYABLE_STATUS)
+        return LLMError(
+            f"Groq returned {status}: {message}{hint}",
+            status=status,
+            retryable=status in RETRYABLE_STATUS,
+            retry_after=_retry_after_seconds(headers, message),
+        )
 
     async def _complete_text(
         self, messages, *, model, max_tokens, temperature=0.2
@@ -176,7 +212,7 @@ class GroqProvider:
                 last = LLMError(f"network error talking to Groq: {exc}", retryable=True)
             else:
                 if resp.status_code >= 400:
-                    last = self._error_from(resp.status_code, resp.content)
+                    last = self._error_from(resp.status_code, resp.content, resp.headers)
                     if not last.retryable:
                         raise last
                 else:
@@ -193,7 +229,7 @@ class GroqProvider:
                         raise LLMError("Groq returned an empty rewrite")
                     return content, usage
             if attempt < MAX_ATTEMPTS:
-                await asyncio.sleep(_backoff(attempt, None))
+                await asyncio.sleep(_backoff(attempt, last.retry_after if last else None))
         raise last or LLMError("Groq request failed")
 
     async def _complete_json(self, messages, *, model, max_tokens, temperature=0.3) -> tuple[dict, Usage]:
@@ -212,7 +248,7 @@ class GroqProvider:
                 last = LLMError(f"network error talking to Groq: {exc}", retryable=True)
             else:
                 if resp.status_code >= 400:
-                    last = self._error_from(resp.status_code, resp.content)
+                    last = self._error_from(resp.status_code, resp.content, resp.headers)
                     if not last.retryable:
                         raise last
                 else:
@@ -238,7 +274,7 @@ class GroqProvider:
                         except json.JSONDecodeError as exc:
                             raise LLMError(f"model did not return valid JSON: {exc}") from exc
             if attempt < MAX_ATTEMPTS:
-                await asyncio.sleep(_backoff(attempt, None))
+                await asyncio.sleep(_backoff(attempt, last.retry_after if last else None))
         raise last or LLMError("Groq request failed")
 
     async def _stream_text(
@@ -260,7 +296,7 @@ class GroqProvider:
                 ) as resp:
                     if resp.status_code >= 400:
                         body = await resp.aread()
-                        raise self._error_from(resp.status_code, body)
+                        raise self._error_from(resp.status_code, body, resp.headers)
                     finish: str | None = None
                     async for line in resp.aiter_lines():
                         if not line or not line.startswith("data:"):
@@ -300,7 +336,7 @@ class GroqProvider:
                 # Partial output has already streamed: restarting would duplicate text.
                 raise last or LLMError("stream failed mid-chapter")
             if attempt < MAX_ATTEMPTS:
-                await asyncio.sleep(_backoff(attempt, None))
+                await asyncio.sleep(_backoff(attempt, last.retry_after if last else None))
         raise last or LLMError("Groq stream failed")
 
     # -- pipeline interface ------------------------------------------------- #

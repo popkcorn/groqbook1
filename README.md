@@ -435,8 +435,8 @@ Interactive docs: `/api/docs`.
 ## Reliability notes
 
 - **Retries**: 429/5xx/transport errors are retried up to four times with jittered exponential
-  backoff, honouring `Retry-After`. A stream is only retried if no token has been emitted —
-  restarting mid-chapter would duplicate prose.
+  backoff. Rate-limit retries honor `Retry-After` and Groq's reset delay in the error message (for
+  example, a 24-second TPM reset); streams retry only before the first token to avoid duplicate prose.
 - **Truncation**: a chapter that stops on `finish_reason == "length"` is continued (up to twice),
   so long chapters do not end mid-sentence.
 - **Plan validation**: the outline is checked (object shape, ≥2 chapters, ≤20 chapters, title
@@ -459,8 +459,9 @@ Interactive docs: `/api/docs`.
   prose that scores well can still be empty.
 - The de-AI pass fixes surface patterns, not substance. It cannot add evidence, fix a wrong claim,
   or improve an argument — by design, it is forbidden from rewriting anything but flagged sentences.
-- Long books are slow by design: chapters run in waves of 3 and each wave waits for its
-  summaries before the next starts. An Epic (20 chapters) is roughly seven waves.
+- Long books are slow by design: chapters run in waves of 2 by default, and each wave waits for
+  summaries before the next starts. Set `BOOKWRIGHT_CONCURRENCY=1` in `.env` if your Groq TPM limit
+  is especially low; restart the app after changing it. An Epic (20 chapters) is roughly ten waves.
 - The continuity window carries 10 chapter summaries. Past ~14 chapters the earliest ones fall
   out of the bible, so very long books will drift; that is a model-context limit, not a bug.
 - Demo-mode prose is fixture text and will read like fixture text. That is intentional.
