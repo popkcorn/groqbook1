@@ -7,6 +7,7 @@ ReportLab is pure Python plus embedded fonts, so a PDF always builds.
 
 from __future__ import annotations
 
+import copy
 import html
 import io
 import re
@@ -59,6 +60,37 @@ LINE_SPACING = {"compact": 1.3, "normal": 1.5, "airy": 1.8}
 PARAGRAPH_STYLES = {"indent", "space"}
 ALIGNMENTS = {"justify", "left"}
 DEFAULT_EXPORT_OPTIONS = ExportOptions()
+
+# Models sometimes use Unicode hyphens that older fonts and ebook/PDF readers
+# cannot render. Keep the intended word hyphen, but export it as the universal
+# ASCII hyphen-minus across every format.
+EXPORT_HYPHENS = str.maketrans({
+    "\u2010": "-",  # hyphen
+    "\u2011": "-",  # non-breaking hyphen
+    "\u00ad": "-",  # soft hyphen
+    "\ufe63": "-",  # small hyphen-minus
+    "\uff0d": "-",  # full-width hyphen-minus
+})
+
+
+def _normalized_export_inputs(plan: Plan, chapters: dict[int, dict]) -> tuple[Plan, dict[int, dict]]:
+    """Normalize uncommon hyphen glyphs without changing the stored book."""
+    plan_copy = copy.deepcopy(plan)
+    for field_name in ("title", "subtitle", "thesis", "audience", "voice"):
+        value = getattr(plan_copy, field_name)
+        if isinstance(value, str):
+            setattr(plan_copy, field_name, value.translate(EXPORT_HYPHENS))
+    for part in plan_copy.parts:
+        part.title = part.title.translate(EXPORT_HYPHENS)
+        part.summary = part.summary.translate(EXPORT_HYPHENS)
+        for chapter in part.chapters:
+            chapter.title = chapter.title.translate(EXPORT_HYPHENS)
+
+    chapters_copy = copy.deepcopy(chapters)
+    for state in chapters_copy.values():
+        if isinstance(state, dict) and isinstance(state.get("text"), str):
+            state["text"] = state["text"].translate(EXPORT_HYPHENS)
+    return plan_copy, chapters_copy
 
 
 def _chapter_marker(index: int, style: str) -> str:
@@ -215,6 +247,7 @@ def to_markdown(
     plan: Plan, chapters: dict[int, dict], *, options: ExportOptions | None = None
 ) -> str:
     options = options or DEFAULT_EXPORT_OPTIONS
+    plan, chapters = _normalized_export_inputs(plan, chapters)
     lines = [f"# {plan.title}", "", f"*{plan.subtitle}*", ""]
     if plan.thesis:
         lines += [f"> {plan.thesis}", ""]
@@ -305,6 +338,7 @@ def to_html(
     options: ExportOptions | None = None,
 ) -> str:
     options = options or DEFAULT_EXPORT_OPTIONS
+    plan, chapters = _normalized_export_inputs(plan, chapters)
     stamp = (generated_at or datetime.now(UTC)).strftime("%d %B %Y")
     toc = ['<nav class="toc" id="contents"><h2>Contents</h2><ol>']
     for part in plan.parts:
@@ -393,6 +427,7 @@ def to_epub(
     plan: Plan, chapters: dict[int, dict], *, options: ExportOptions | None = None
 ) -> bytes:
     options = options or DEFAULT_EXPORT_OPTIONS
+    plan, chapters = _normalized_export_inputs(plan, chapters)
     book_id = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, plan.title + plan.subtitle)}"
     modified = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -554,6 +589,7 @@ def to_pdf(
     from reportlab.platypus.tableofcontents import TableOfContents
 
     options = options or DEFAULT_EXPORT_OPTIONS
+    plan, chapters = _normalized_export_inputs(plan, chapters)
     fonts = _font_files()
     if {"serif", "serif_bold", "sans", "sans_bold"} <= fonts.keys():
         for name, path in fonts.items():

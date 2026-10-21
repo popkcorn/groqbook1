@@ -618,6 +618,33 @@ def test_epub_is_a_valid_archive(finished):
             assert f"OEBPS/{href}" in names or href.startswith("http")
 
 
+def test_unicode_hyphens_export_as_ascii_without_mutating_book(finished):
+    plan, chapters = finished
+    source = "A cul\u2011de\u2011sac. A red\u2010and\u2010white sign."
+    altered = {index: {**state, "text": source} for index, state in chapters.items()}
+
+    markdown = to_markdown(plan, altered)
+    html_output = to_html(plan, altered)
+    epub = to_epub(plan, altered)
+    assert "cul-de-sac" in markdown and "red-and-white" in markdown
+    assert "cul-de-sac" in html_output and "red-and-white" in html_output
+    assert "\u2010" not in markdown + html_output and "\u2011" not in markdown + html_output
+    with zipfile.ZipFile(io.BytesIO(epub)) as archive:
+        epub_text = "".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.endswith(".xhtml")
+        )
+    assert "cul-de-sac" in epub_text and "red-and-white" in epub_text
+    assert "\u2010" not in epub_text and "\u2011" not in epub_text
+    assert all(state["text"] != source for state in chapters.values())
+
+    pymupdf = pytest.importorskip("pymupdf")
+    pdf, _, _ = export(plan, altered, "pdf")
+    pdf_text = "".join(page.get_text() for page in pymupdf.open(stream=pdf, filetype="pdf"))
+    assert "cul-de-sac" in pdf_text and "red-and-white" in pdf_text
+
+
 def test_export_options_change_chapter_heading_and_validate(finished):
     plan, chapters = finished
     numbered = ExportOptions(chapter_heading="number")
