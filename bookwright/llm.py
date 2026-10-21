@@ -67,11 +67,14 @@ class Provider(Protocol):
     writer_model: str
     editor_model: str
 
-    async def plan(self, *, topic: str, audience: str, tone: str, length) -> tuple[dict, Usage]:
+    async def plan(
+        self, *, topic: str, audience: str, tone: str, length, notes: str = ""
+    ) -> tuple[dict, Usage]:
         ...
 
     def write_chapter(
-        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = ""
+        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = "",
+        pov: str = "", voice_sample: str = "",
     ) -> AsyncIterator[dict]:
         ...
 
@@ -294,11 +297,15 @@ class GroqProvider:
         raise last or LLMError("Groq stream failed")
 
     # -- pipeline interface ------------------------------------------------- #
-    async def plan(self, *, topic: str, audience: str, tone: str, length) -> tuple[dict, Usage]:
+    async def plan(
+        self, *, topic: str, audience: str, tone: str, length, notes: str = ""
+    ) -> tuple[dict, Usage]:
         from . import prompts
 
         return await self._complete_json(
-            prompts.plan_messages(topic=topic, audience=audience, tone=tone, length=length),
+            prompts.plan_messages(
+                topic=topic, audience=audience, tone=tone, length=length, notes=notes
+            ),
             model=self.architect_model,
             max_tokens=config.ARCHITECT_MAX_TOKENS,
         )
@@ -314,7 +321,8 @@ class GroqProvider:
         )
 
     async def write_chapter(
-        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = ""
+        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = "",
+        pov: str = "", voice_sample: str = "",
     ) -> AsyncIterator[dict]:
         from . import prompts
 
@@ -323,7 +331,7 @@ class GroqProvider:
         for attempt in range(config.MAX_CONTINUATIONS + 1):
             messages = prompts.chapter_messages(
                 plan=plan, chapter=chapter, part_title=part_title, bible=bible,
-                style=style, continuation=attempt > 0,
+                style=style, continuation=attempt > 0, pov=pov, voice_sample=voice_sample,
             )
             if attempt > 0 and buffer:
                 messages[-1]["content"] += "\n\nAlready written (do not repeat):\n" + buffer[-1200:]

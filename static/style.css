@@ -490,3 +490,57 @@ textarea:focus, select:focus, input:focus {
 }
 .ch-foot .revert-btn:hover { border-color: var(--red); color: var(--red); }
 .chapter.reverted .ch-foot .fixes { color: var(--muted); border-color: var(--rule-strong); background: var(--paper); }
+
+/* ------------------------------------------------------- outline review */
+.outline {
+  margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
+}
+.outline-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .5rem;
+  margin-bottom: .7rem;
+}
+.outline h2 {
+  font-size: .66rem; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); margin: 0; font-weight: 600;
+}
+.outline .field { margin-bottom: .6rem; }
+.outline input[type="text"], .outline input:not([type]) {
+  font: inherit; font-size: .82rem; width: 100%; padding: .35rem .45rem;
+  border: 1px solid var(--rule-strong); border-radius: 2px; background: #fff; color: var(--ink);
+}
+.o-part {
+  font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+  margin: .85rem 0 .35rem;
+}
+.o-chapter {
+  border: 1px solid var(--rule); border-radius: 3px; padding: .45rem .5rem;
+  margin-bottom: .45rem; background: var(--paper);
+}
+.o-head { display: flex; align-items: center; gap: .4rem; }
+.o-num {
+  font-size: .62rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  min-width: 1.1em;
+}
+.o-title {
+  flex: 1; font: inherit; font-size: .8rem; font-weight: 600; padding: .22rem .35rem;
+  border: 1px solid transparent; border-radius: 2px; background: #fff; color: var(--ink);
+}
+.o-title:hover, .o-title:focus { border-color: var(--rule-strong); }
+.o-drop {
+  font: inherit; font-size: .85rem; line-height: 1; padding: .1rem .35rem; cursor: pointer;
+  border: 1px solid transparent; border-radius: 2px; background: none; color: var(--muted);
+}
+.o-drop:hover { border-color: var(--red); color: var(--red); }
+.o-purpose, .o-beats {
+  display: block; width: 100%; font: inherit; font-size: .72rem; line-height: 1.45;
+  margin-top: .3rem; padding: .3rem .35rem; resize: vertical;
+  border: 1px solid var(--rule); border-radius: 2px; background: #fff; color: var(--ink-soft);
+}
+.o-beats { color: var(--muted); }
+.outline-actions {
+  display: flex; gap: .45rem; align-items: center; margin-top: .7rem; flex-wrap: wrap;
+}
+.outline-actions .primary { flex: 1; }
+.outline-toggle { margin: .9rem 0 .2rem; }
+.toggle.muted { opacity: .45; }
+.toggle.muted .t-desc { text-decoration: line-through; }

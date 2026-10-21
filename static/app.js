@@ -17,6 +17,7 @@
     directives: [],
     banned: [],
     profile: null,
+    outline: null,
     preset: null,
     job: null,
     plan: null,
@@ -261,6 +262,37 @@
       updateEstimate(presets);
     });
 
+    // Point of view
+    $("#review-outline").checked = Boolean(
+      presets.review_outline.browser_default ?? presets.review_outline.default
+    );
+
+    const pov = $("#pov");
+    presets.pov.options.forEach((option) => {
+      const opt = new Option(option.label, option.id);
+      opt.title = option.description || "";
+      pov.add(opt);
+    });
+    pov.value = presets.pov.default || "auto";
+    pov.addEventListener("change", () => {
+      applyPovConflicts();
+      updateEstimate(presets);
+    });
+
+    // Notes and voice sample
+    const notes = $("#notes");
+    notes.addEventListener("input", () => {
+      $("#notes-count").textContent = notes.value.length;
+      $("#grounding-count").textContent =
+        notes.value.trim() || $("#voice-sample").value.trim() ? "in use" : "optional";
+      updateEstimate(presets);
+    });
+    const voice = $("#voice-sample");
+    voice.addEventListener("input", () => {
+      $("#voice-count").textContent = voice.value.length;
+      updateEstimate(presets);
+    });
+
     // Style toggles
     const toggles = $("#anti-patterns");
     const defaults = new Set(presets.default_directives || []);
@@ -306,7 +338,33 @@
       updateEstimate(presets);
     });
 
+    applyPovConflicts();
     updateEstimate(presets);
+  }
+
+  // A rule that forbids the person the author just chose would fight the writer
+  // for the whole book, so the switch is turned off instead.
+  const POV_BLOCKS = { first: "no_first_person", we: "no_first_person", you: "no_second_person" };
+  function applyPovConflicts() {
+    const blocked = POV_BLOCKS[$("#pov").value];
+    const inputs = [...window.document.querySelectorAll("#anti-patterns input")];
+    let dropped = false;
+    inputs.forEach((input) => {
+      const conflicts = input.value === blocked;
+      if (conflicts && input.checked) {
+        input.checked = false;
+        dropped = true;
+      }
+      input.disabled = conflicts;
+      input.closest(".toggle")?.classList.toggle("muted", conflicts);
+    });
+    if (dropped || blocked) {
+      state.directives = inputs.filter((i) => i.checked).map((i) => i.value);
+      paintStyleCount();
+    }
+    $("#pov-hint").textContent = blocked
+      ? `“${blocked === "no_first_person" ? "No I" : "No you"}” is switched off — it contradicts this point of view.`
+      : "A rule that contradicts this is switched off rather than half-applied.";
   }
 
   function currentLength(presets) {
@@ -325,6 +383,8 @@
     if (extra) styleBits.push("house style");
     if ($("#stylist-on").checked) styleBits.push(`de-AI pass (${$("#stylist-strength").value})`);
     if (state.banned.length) styleBits.push(`${state.banned.length} banned phrases`);
+    const notesChars = $("#notes") ? $("#notes").value.trim().length : 0;
+    if (notesChars) styleBits.push(`${notesChars} chars of notes`);
     const suffix = styleBits.length ? ` · ${styleBits.join(" + ")}` : "";
     const words = compact(p.total_words);
     $("#estimate").textContent = state.key
@@ -344,6 +404,7 @@
       $("#extra-instructions").value = profile.extra;
       $("#extra-count").textContent = profile.extra.length;
     }
+    applyPovConflicts();
     paintStyleCount();
     updateEstimate(presets);
   }
@@ -415,6 +476,10 @@
     payload.stylist_strength = $("#stylist-strength").value;
     payload.banned_phrases = state.banned;
     payload.profile = state.profile || null;
+    payload.notes = $("#notes").value.trim();
+    payload.voice_sample = $("#voice-sample").value.trim();
+    payload.pov = $("#pov").value || "auto";
+    payload.review_outline = $("#review-outline").checked;
     return payload;
   }
 
@@ -449,6 +514,15 @@
       if (["done", "partial", "error", "cancelled"].includes(snap.status)) closeStream(false);
     });
 
+    stream.addEventListener("outline_review", (e) => {
+      const data = JSON.parse(e.data);
+      if (data.plan) openOutline(data.plan);
+      setStatus(data.message || "Outline ready for review");
+      $("#run").hidden = false;
+      $("#cancel").hidden = false;
+      $("#again").hidden = true;
+    });
+
     stream.addEventListener("status", (e) => {
       const data = JSON.parse(e.data);
       if (data.message) setStatus(data.message);
@@ -457,7 +531,9 @@
     stream.addEventListener("plan", (e) => {
       const data = JSON.parse(e.data);
       renderPlan(data.plan);
-      setStatus("Plan accepted — drafting chapters");
+      if (state.status !== "awaiting_outline") {
+        setStatus("Plan accepted — drafting chapters");
+      }
     });
 
     stream.addEventListener("chapter_start", (e) => {
@@ -552,6 +628,7 @@
           : `Book written in ${duration(data.elapsed)}`;
       setStatus(label);
       markRunDone(data.status === "partial" ? "error" : "done");
+      closeOutline();
       applyStats(data.stats);
       if (data.style_report) renderStyleReport(data.style_report);
       closeStream();
@@ -571,6 +648,7 @@
     stream.addEventListener("cancelled", () => {
       setStatus("Stopped — what was written is kept");
       markRunDone("error");
+      closeOutline();
       closeStream();
     });
 
@@ -601,6 +679,9 @@
     $("#toc-list").innerHTML = "";
     $("#report").hidden = true;
     $("#r-residue").replaceChildren();
+    $("#outline").hidden = true;
+    state.outline = null;
+    state.status = null;
     $("#rail span").style.width = "0%";
     $("#meter-fill").style.width = "0%";
     markRunDone(null);
@@ -608,6 +689,16 @@
 
   function applySnapshot(snap) {
     if (snap.plan) renderPlan(snap.plan, snap.chapters);
+    state.status = snap.status;
+    if (snap.status === "awaiting_outline" && snap.plan) {
+      openOutline(snap.plan);
+      setStatus("Outline ready — edit it, then approve to start writing");
+      $("#run").hidden = false;
+      $("#cancel").hidden = false;
+      $("#again").hidden = true;
+    } else if (snap.status !== "awaiting_outline") {
+      closeOutline();
+    }
     for (const chapter of snap.chapters || []) {
       ensureChapter(chapter.index, chapter.title);
       const local = state.chapters.get(chapter.index);
@@ -884,6 +975,159 @@
     }
     $("#r-empty").hidden = entries.length > 0;
   }
+
+  // ------------------------------------------------------------- outline
+  // The plan arrives as data, is edited as data, and goes back as data. The
+  // server re-validates it, so a bad edit is rejected, not written.
+  function openOutline(plan) {
+    if (!plan || !plan.parts) return;
+    state.outline = JSON.parse(JSON.stringify(plan));
+    $("#outline").hidden = false;
+    $("#o-title").value = plan.title || "";
+    $("#o-subtitle").value = plan.subtitle || "";
+    paintOutline();
+    if (state.chapters.size === 0) {
+      // Preview rows so the reader pane shows the shape before any prose exists.
+      renderPlan(plan, []);
+    }
+    if (typeof $("#outline").scrollIntoView === "function") {
+      $("#outline").scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+
+  function closeOutline() {
+    $("#outline").hidden = true;
+    $("#o-chapters").replaceChildren();
+  }
+
+  function outlineChapters() {
+    return state.outline ? state.outline.parts.flatMap((part) => part.chapters) : [];
+  }
+
+  function paintOutline() {
+    const host = $("#o-chapters");
+    host.replaceChildren();
+    let n = 0;
+    for (const part of state.outline.parts) {
+      const heading = el("p", "o-part", `Part ${part.index} · ${part.title || "untitled"}`);
+      host.append(heading);
+      for (const chapter of part.chapters) {
+        n += 1;
+        const row = el("div", "o-chapter");
+        row.dataset.index = String(chapter.index);
+
+        const head = el("div", "o-head");
+        head.append(el("span", "o-num", String(n)));
+        const title = document.createElement("input");
+        title.className = "o-title";
+        title.maxLength = 120;
+        title.value = chapter.title || "";
+        title.setAttribute("aria-label", `Chapter ${n} title`);
+        title.addEventListener("input", () => { chapter.title = title.value; });
+        const drop = el("button", "o-drop", "×");
+        drop.type = "button";
+        drop.title = "Remove this chapter";
+        drop.addEventListener("click", () => {
+          if (outlineChapters().length <= 2) {
+            toast("A book needs at least two chapters.");
+            return;
+          }
+          part.chapters = part.chapters.filter((c) => c !== chapter);
+          renumberOutline();
+          paintOutline();
+        });
+        head.append(title, drop);
+        row.append(head);
+
+        const purpose = document.createElement("textarea");
+        purpose.className = "o-purpose";
+        purpose.rows = 2;
+        purpose.maxLength = 320;
+        purpose.value = chapter.purpose || "";
+        purpose.placeholder = "What this chapter must establish";
+        purpose.addEventListener("input", () => { chapter.purpose = purpose.value; });
+
+        const beats = document.createElement("textarea");
+        beats.className = "o-beats";
+        beats.rows = 3;
+        beats.value = (chapter.beats || []).join("\n");
+        beats.placeholder = "One concrete beat per line";
+        beats.addEventListener("input", () => {
+          chapter.beats = beats.value.split("\n").map((b) => b.trim()).filter(Boolean).slice(0, 6);
+        });
+
+        row.append(purpose, beats);
+        host.append(row);
+      }
+    }
+    $("#o-count").textContent = `${n} chapter${n === 1 ? "" : "s"} · edits apply to what gets written`;
+  }
+
+  function renumberOutline() {
+    let index = 0;
+    state.outline.parts.forEach((part, p) => {
+      part.index = p + 1;
+      part.chapters.forEach((chapter) => { index += 1; chapter.index = index; });
+    });
+    state.outline.parts = state.outline.parts.filter((p) => p.chapters.length);
+  }
+
+  $("#o-add").addEventListener("click", () => {
+    if (!state.outline) return;
+    if (outlineChapters().length >= 20) {
+      toast("Twenty chapters is the ceiling.");
+      return;
+    }
+    const last = state.outline.parts[state.outline.parts.length - 1];
+    last.chapters.push({
+      index: 0, title: "Untitled chapter", purpose: "", beats: [], terms: [], words: 0,
+    });
+    renumberOutline();
+    paintOutline();
+  });
+
+  $("#o-approve").addEventListener("click", async () => {
+    if (!state.outline || !state.job) return;
+    const empty = outlineChapters().some((c) => !String(c.title || "").trim());
+    if (empty) {
+      toast("Every chapter needs a title before you approve the outline.");
+      return;
+    }
+    renumberOutline();
+    const body = {
+      title: $("#o-title").value.trim() || state.outline.title,
+      subtitle: $("#o-subtitle").value.trim(),
+      thesis: state.outline.thesis || "",
+      voice: state.outline.voice || "",
+      parts: state.outline.parts.map((part) => ({
+        title: part.title,
+        summary: part.summary || "",
+        chapters: part.chapters.map((c) => ({
+          title: String(c.title).trim(),
+          purpose: String(c.purpose || "").trim() || "The chapter as titled.",
+          beats: c.beats || [],
+        })),
+      })),
+    };
+    const button = $("#o-approve");
+    button.disabled = true;
+    try {
+      const res = await api(`/api/books/${state.job}/outline`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      closeOutline();
+      setStatus("Outline approved — drafting chapters");
+      if (res.plan) {
+        state.chapters.clear();
+        renderPlan(res.plan, []);
+      }
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
 
   function setStatus(text) {
     $("#status").textContent = text;

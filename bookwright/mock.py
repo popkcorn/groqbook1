@@ -206,7 +206,10 @@ class MockProvider:
     writer_model = "demo/writer"
     editor_model = "demo/editor"
 
-    async def plan(self, *, topic: str, audience: str, tone: str, length) -> tuple[dict, Usage]:
+    async def plan(
+        self, *, topic: str, audience: str, tone: str, length, notes: str = ""
+    ) -> tuple[dict, Usage]:
+        # Notes shape the real architect's plan; the fixture plan is fixed.
         await asyncio.sleep(0.35)
         per_part = max(1, round(length.chapters / length.parts))
         chapters: list[dict] = []
@@ -252,7 +255,8 @@ class MockProvider:
         return plan, Usage(prompt_tokens=180, completion_tokens=words, elapsed=0.35)
 
     async def write_chapter(
-        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = ""
+        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = "",
+        pov: str = "", voice_sample: str = "",
     ) -> AsyncIterator[dict]:
         text = compose_chapter(plan.title, chapter, chapter.words)
         # Demo prose is fixture text, but honour the visible directives so the

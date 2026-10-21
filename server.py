@@ -12,7 +12,7 @@ import os
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +23,7 @@ from bookwright.exporters import export
 from bookwright.jobs import BookSpec, JobStore, estimate, run_book
 from bookwright.llm import GroqProvider
 from bookwright.mock import MockProvider
+from bookwright.schema import PlanError, parse_plan
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("bookwright.server")
@@ -57,6 +58,10 @@ class BookRequest(BaseModel):
         default_factory=list, max_length=config.MAX_BANNED_PHRASES
     )
     profile: str | None = None
+    notes: str = Field(default="", max_length=config.MAX_NOTES_CHARS)
+    voice_sample: str = Field(default="", max_length=config.MAX_VOICE_SAMPLE_CHARS)
+    pov: str = config.DEFAULT_POV
+    review_outline: bool = config.DEFAULT_REVIEW_OUTLINE
 
     @field_validator("topic")
     @classmethod
@@ -96,6 +101,23 @@ class BookRequest(BaseModel):
     def _known_profile(cls, value: str | None) -> str | None:
         if value is not None and value not in config.EDITORIAL_PROFILES:
             raise ValueError(f"unknown profile: {value}")
+        return value
+
+    @field_validator("notes")
+    @classmethod
+    def _clean_notes(cls, value: str) -> str:
+        return value.strip()[: config.MAX_NOTES_CHARS]
+
+    @field_validator("voice_sample")
+    @classmethod
+    def _clean_sample(cls, value: str) -> str:
+        return value.strip()[: config.MAX_VOICE_SAMPLE_CHARS]
+
+    @field_validator("pov")
+    @classmethod
+    def _known_pov(cls, value: str) -> str:
+        if value not in config.POVS:
+            raise ValueError(f"pov must be one of {sorted(config.POVS)}")
         return value
 
     @field_validator("stylist_strength")
@@ -153,7 +175,8 @@ def _provider(api_key: str):
 
 
 def _running_jobs() -> int:
-    return sum(1 for job_id in list(store._jobs) if not store._jobs[job_id].terminal)
+    """Jobs actually using a model slot. A book awaiting outline review is idle."""
+    return sum(1 for job_id in list(store._jobs) if store._jobs[job_id].busy)
 
 
 @app.get("/")
@@ -201,6 +224,10 @@ async def create_book(payload: BookRequest, request: Request) -> JSONResponse:
         stylist=payload.stylist,
         stylist_strength=strength,
         banned_phrases=payload.banned_phrases,
+        notes=payload.notes,
+        voice_sample=payload.voice_sample,
+        pov=payload.pov,
+        review_outline=payload.review_outline,
     )
     provider = _provider(api_key)
     job = store.create(spec, provider)
@@ -250,6 +277,38 @@ async def revert_chapter(job_id: str, index: int) -> dict:
         "text": job.chapters[index]["text"],
         "report": job.style_report(),
     }
+
+
+@app.post("/api/books/{job_id}/outline")
+async def approve_outline(job_id: str, payload: dict = Body(...)) -> dict:
+    """Accept an author-edited outline and start writing.
+
+    The body is the same JSON shape the architect returns; it is re-validated
+    here, so an edit cannot smuggle in a structure the writer cannot use.
+    """
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(404, "no such book")
+    if job.status != "awaiting_outline":
+        raise HTTPException(409, "this book is not waiting for an outline review")
+    spec = job.spec
+    try:
+        plan = parse_plan(
+            payload,
+            topic=spec.topic,
+            audience=spec.audience,
+            tone=spec.tone,
+            words_per_chapter=spec.length.words_per_chapter,
+            max_chapters=config.MAX_CHAPTERS,
+        )
+    except PlanError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        job.apply_outline(plan)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    log.info("job %s outline approved: %s chapters", job.id, len(plan.chapters))
+    return {"ok": True, "plan": plan.to_dict(), "stats": job.stats()}
 
 
 @app.post("/api/books/{job_id}/cancel")

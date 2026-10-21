@@ -329,6 +329,50 @@ MAX_BANNED_PHRASES = 25
 BANNED_PHRASE_MAX_CHARS = 60
 MAX_EXTRA_INSTRUCTIONS = 400
 
+# Author-supplied source material. This is the strongest grounding lever the
+# app has: specifics the writer is told to use rather than invent.
+MAX_NOTES_CHARS = 4000
+MAX_VOICE_SAMPLE_CHARS = 1200
+
+# Grammatical person. "auto" leaves it to the plan's own voice direction.
+POVS = {
+    "auto": (
+        "As the plan decides",
+        "",
+    ),
+    "first": (
+        "First person — I",
+        "Grammatical person: first person singular. The author is present in the prose "
+        "('I spent a month with the maintenance crew'). Keep it sparing: evidence and "
+        "observation, not memoir.",
+    ),
+    "we": (
+        "First person — we",
+        "Grammatical person: first person plural ('we'). Use it for shared work and "
+        "collective decisions; never for a team the author is not part of.",
+    ),
+    "you": (
+        "Second person — you",
+        "Grammatical person: second person. Address the reader directly ('you will "
+        "recognise this failure'). Do not let it turn into a manual of instructions.",
+    ),
+    "third": (
+        "Third person",
+        "Grammatical person: third person. Keep the author out of the prose: no 'I', no "
+        "'we', no 'you' as the reader. Let the subject carry the sentences.",
+    ),
+}
+DEFAULT_POV = "auto"
+
+# Rules that contradict a chosen person and are dropped rather than half-applied.
+POV_CONFLICTS = {
+    "first": ("no_first_person",),
+    "we": ("no_first_person",),
+    "you": ("no_second_person",),
+}
+
+DEFAULT_REVIEW_OUTLINE = False  # the browser sends true; the API stays non-blocking
+
 AUDIENCES = ["Curious general reader", "Practitioner", "Student", "Executive", "Specialist"]
 
 # --------------------------------------------------------------------------- #
@@ -381,6 +425,19 @@ def presets_payload() -> dict:
         "banned_phrases": {
             "max": MAX_BANNED_PHRASES,
             "max_chars": BANNED_PHRASE_MAX_CHARS,
+        },
+        "notes": {"max_chars": MAX_NOTES_CHARS},
+        "voice_sample": {"max_chars": MAX_VOICE_SAMPLE_CHARS},
+        "pov": {
+            "options": [
+                {"id": key, "label": label, "description": instruction}
+                for key, (label, instruction) in POVS.items()
+            ],
+            "default": DEFAULT_POV,
+        },
+        "review_outline": {
+            "default": DEFAULT_REVIEW_OUTLINE,
+            "browser_default": True,
         },
         "stylist": {
             "default": STYLIST_DEFAULT,

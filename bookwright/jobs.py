@@ -39,6 +39,10 @@ class BookSpec:
     stylist: bool = config.STYLIST_DEFAULT
     stylist_strength: str = config.DEFAULT_STYLIST_STRENGTH
     banned_phrases: list[str] = field(default_factory=list)
+    notes: str = ""
+    voice_sample: str = ""
+    pov: str = config.DEFAULT_POV
+    review_outline: bool = config.DEFAULT_REVIEW_OUTLINE
 
     @property
     def length(self) -> config.LengthPreset:
@@ -64,15 +68,36 @@ class BookSpec:
     def style(self) -> str:
         from .prompts import style_block
 
-        return style_block(self.directives, self.extra_instructions, self.clean_banned())
+        return style_block(self.clean_directives(), self.extra_instructions, self.clean_banned())
 
     def clean_directives(self) -> list[str]:
-        """Drop unknown ids and de-duplicate, preserving order."""
+        """Drop unknown ids and de-duplicate, preserving order.
+
+        A rule that contradicts the chosen grammatical person is dropped here
+        rather than half-applied: asking for second person *and* "no you" is a
+        contradiction the model cannot satisfy, and the editor would then fight
+        the writer for the whole book.
+        """
+        blocked = set(config.POV_CONFLICTS.get(self.pov, ()))
         seen: list[str] = []
         for key in self.directives:
-            if key in config.ANTI_PATTERNS and key not in seen:
+            if key in config.ANTI_PATTERNS and key not in seen and key not in blocked:
                 seen.append(key)
+        # A non-empty author ban list is itself an active rule, regardless of
+        # which profile was chosen. It must reach both the writer and scanner.
+        if self.clean_banned() and "banned_phrases" not in seen:
+            seen.append("banned_phrases")
         return seen
+
+    @property
+    def pov_text(self) -> str:
+        return config.POVS.get(self.pov, ("", ""))[1]
+
+    def clean_notes(self) -> str:
+        return (self.notes or "").strip()[: config.MAX_NOTES_CHARS]
+
+    def clean_voice_sample(self) -> str:
+        return (self.voice_sample or "").strip()[: config.MAX_VOICE_SAMPLE_CHARS]
 
     def clean_banned(self) -> list[str]:
         """Trim, drop empties and duplicates, cap length and count."""
@@ -96,6 +121,10 @@ class BookSpec:
             "stylist": self.stylist,
             "stylist_strength": self.stylist_strength,
             "banned_phrases": self.clean_banned(),
+            "notes": self.clean_notes(),
+            "voice_sample": self.clean_voice_sample(),
+            "pov": self.pov if self.pov in config.POVS else config.DEFAULT_POV,
+            "review_outline": self.review_outline,
         }
 
 
@@ -114,6 +143,8 @@ class Job:
     events: list[dict] = field(default_factory=list)
     subscribers: set[asyncio.Queue] = field(default_factory=set)
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    # Set when the author approves (or edits) the outline; the pipeline waits.
+    resume_event: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task | None = None
 
     # -- events ------------------------------------------------------------- #
@@ -150,6 +181,15 @@ class Job:
     @property
     def terminal(self) -> bool:
         return self.status in {"done", "partial", "error", "cancelled"}
+
+    @property
+    def busy(self) -> bool:
+        """True while the job is holding a model slot.
+
+        A book parked at outline review is idle: it is not calling the API, so
+        it must not count against the concurrency cap.
+        """
+        return not self.terminal and self.status != "awaiting_outline"
 
     def stats(self) -> dict:
         elapsed = (self.finished_at or time.time()) - self.started_at
@@ -233,8 +273,36 @@ class Job:
         })
         return report
 
+    def seed_chapters(self) -> None:
+        """(Re)build the per-chapter state from the current plan."""
+        self.chapters = {}
+        for chapter in self.plan.chapters if self.plan else []:
+            self.chapters[chapter.index] = {
+                "title": chapter.title,
+                "text": "",
+                "status": "pending",
+                "summary": "",
+                "original": None,
+                "style_before": None,
+                "style_after": None,
+            }
+
+    def apply_outline(self, plan: Plan) -> None:
+        """Swap in an author-edited plan and let the writer continue."""
+        if self.status != "awaiting_outline":
+            raise ValueError("this book is not waiting for an outline review")
+        self.plan = plan
+        self.seed_chapters()
+        # Claim the review slot before signalling, so two fast approve requests
+        # cannot race and replace one another's outline.
+        self.status = "writing"
+        self.emit({"type": "plan", "plan": plan.to_dict(), "stats": self.stats()})
+        self.resume_event.set()
+
     def cancel(self) -> None:
         self.cancel_event.set()
+        # Unblock a job parked at outline review so the task can unwind.
+        self.resume_event.set()
         if self.task and not self.task.done():
             self.task.cancel()
 
@@ -287,7 +355,8 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
         })
 
         raw, usage = await provider.plan(
-            topic=spec.topic, audience=spec.audience, tone=spec.tone, length=length
+            topic=spec.topic, audience=spec.audience, tone=spec.tone, length=length,
+            notes=spec.clean_notes(),
         )
         _merge(job, usage)
         job.emit({"type": "stats", "stats": job.stats()})
@@ -306,7 +375,8 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
                 raise
             raw, usage = await repair(
                 prompts.plan_messages(
-                    topic=spec.topic, audience=spec.audience, tone=spec.tone, length=length
+                    topic=spec.topic, audience=spec.audience, tone=spec.tone, length=length,
+                    notes=spec.clean_notes(),
                 ),
                 str(exc),
             )
@@ -317,17 +387,25 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
             )
 
         job.plan = plan
-        for chapter in plan.chapters:
-            job.chapters[chapter.index] = {
-                "title": chapter.title,
-                "text": "",
-                "status": "pending",
-                "summary": "",
-                "original": None,
-                "style_before": None,
-                "style_after": None,
-            }
         job.emit({"type": "plan", "plan": plan.to_dict(), "stats": job.stats()})
+
+        if spec.review_outline:
+            job.status = "awaiting_outline"
+            job.emit({
+                "type": "outline_review",
+                "plan": plan.to_dict(),
+                "message": "Outline ready — edit it, then approve to start writing",
+                "stats": job.stats(),
+            })
+            log.info("job %s waiting for outline review", job.id)
+            await job.resume_event.wait()
+            job.resume_event.clear()
+            if job.cancelled:
+                raise asyncio.CancelledError
+            plan = job.plan or plan
+            job.status = "writing"
+
+        job.seed_chapters()
 
         if job.cancelled:
             raise asyncio.CancelledError
@@ -349,7 +427,9 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
                 "message": f"Drafting chapter{'s' if len(wave) > 1 else ''} "
                            + ", ".join(str(c.index) for c in wave),
             })
-            bible = prompts.build_bible(plan, summaries, terms, style=spec.style)
+            bible = prompts.build_bible(
+                plan, summaries, terms, style=spec.style, notes=spec.clean_notes()
+            )
 
             results = await asyncio.gather(
                 *(
@@ -457,7 +537,9 @@ async def _write_chapter(
 
     buffer: list[str] = []
     async for event in provider.write_chapter(
-        plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style
+        plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style,
+        pov=spec.pov_text if spec else "",
+        voice_sample=spec.clean_voice_sample() if spec else "",
     ):
         if job.cancelled:
             raise asyncio.CancelledError
@@ -496,6 +578,8 @@ def estimate(spec: BookSpec) -> dict[str, Any]:
     chapters = length.chapters
     # Per chapter: prompt grows with the bible window; completion ~1.35 tokens/word.
     per_chapter_in = 620 + 110 * min(chapters, config.BIBLE_SUMMARY_WINDOW)
+    per_chapter_in += len(spec.clean_notes()) // 4  # notes ride with every chapter
+    per_chapter_in += len(spec.clean_voice_sample()) // 4  # voice reference rides with each chapter
     per_chapter_out = int(length.words_per_chapter * 1.4)
     total_in = 1400 + chapters * per_chapter_in
     total_out = 900 + chapters * per_chapter_out

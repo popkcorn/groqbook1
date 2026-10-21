@@ -163,6 +163,39 @@ Twelve, grouped in the picker: **plain** (clear, conversational, minimal),
 editorial, socratic) and **specialist** (technical, satirical). The voice shapes
 the architect's plan as well as the prose.
 
+### Ground the book in your material
+
+The book form has a **Notes & voice** section for the things a one-sentence brief
+cannot supply:
+
+- **Facts, notes and sources** (up to 4,000 chars): paste the dates, figures,
+  names, case studies or references the book should actually use. The architect
+  sees them while planning; the writer carries them in the continuity bible for
+  every chapter. The prompt says to avoid unsupported specifics and qualify
+  unverified claims — but this is grounding, not a fact-checker. Check the output.
+- **Voice sample** (up to 1,200 chars): a paragraph of your own writing whose
+  cadence and diction the model should approximate. Its subject and sentences
+  are explicitly not to be reused. Only submit text you have the right to use.
+- **Point of view**: Auto, I, we, you, or third person. If a style switch
+  contradicts the chosen person (for example, “no I” with first person), the
+  conflicting rule is disabled rather than asking the writer to do both.
+
+Both notes and the voice sample are included in the API's conservative token
+estimate. Longer references improve grounding but also add input tokens to every
+chapter.
+
+### Approve the outline before drafting
+
+**Review the outline before writing** is on by default in the browser. The
+architect returns the title, parts, chapter purposes and concrete beats; the
+book pauses so you can retitle chapters, rewrite purposes and beats, add a
+chapter, or remove one. Approving starts the writer. Every edit is re-validated
+by the server, including the two-chapter minimum and 20-chapter ceiling. If you
+turn the option off, the book writes as soon as the plan passes validation.
+
+This is the cheapest point to correct a weak structure. A chapter whose purpose
+is wrong is much harder to repair after several thousand words exist.
+
 ### Style controls — getting away from "AI voice"
 
 Twenty-four switches, each injecting a precise instruction into every chapter prompt
@@ -326,7 +359,7 @@ bookwright/
   exporters.py   Markdown · HTML · EPUB 3 · PDF
 server.py        FastAPI: JSON API, SSE stream, export endpoints
 static/          dependency-free front-end (no build step, no CDN)
-tests/           64 tests: schema, pipeline, cancel, continuity, env, style, exports
+tests/           schema, pipeline, cancel, continuity, env, style, exports, UI-facing options
 run.py           standalone launcher: checks deps, loads .env, opens the browser
 start-windows.bat / start-mac-linux.sh
                  double-click / one-command setup for a fresh machine
@@ -343,9 +376,10 @@ main.py          the original Groqbook app, unchanged, for reference
 | `GET` | `/api/presets` | Lengths, tones, audiences, limits |
 | `POST` | `/api/books` | Start a book; returns `id` + token estimate |
 | `GET` | `/api/books/{id}` | Full snapshot (plan, chapters, stats) |
-| `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `stylist_start`, `stylist_done`, `stylist_rejected`, `chapter_reverted`, `chapter_drafted`, `chapter_done`, `done`, `error` |
+| `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `stylist_start`, `stylist_done`, `stylist_rejected`, `chapter_reverted`, `chapter_drafted`, `chapter_done`, `outline_review`, `done`, `error` |
 | `GET` | `/api/books/{id}/style-report` | Residue per rule, flags fixed, readability |
 | `POST` | `/api/books/{id}/chapters/{n}/revert` | Undo the editorial edits on one chapter |
+| `POST` | `/api/books/{id}/outline` | Validate and approve an edited plan; resumes the parked writer |
 | `POST` | `/api/books/{id}/cancel` | Stop; keeps what was written |
 | `GET` | `/api/books/{id}/export/{md\|html\|epub\|pdf}` | Download |
 
@@ -355,6 +389,12 @@ curl -s -X POST localhost:8000/api/books -H 'content-type: application/json' \
 curl -N localhost:8000/api/books/<id>/events          # live progress
 curl -OJ localhost:8000/api/books/<id>/export/pdf
 ```
+
+For grounded or reviewed books, `POST /api/books` also accepts `notes`,
+`voice_sample`, `pov` (`auto`, `first`, `we`, `you`, `third`), and
+`review_outline`. Browser review defaults on; API clients opt in with
+`"review_outline": true`. The outline endpoint accepts the architect's plan
+shape with your edits; it does not accept prose.
 
 Interactive docs: `/api/docs`.
 
@@ -367,7 +407,7 @@ Interactive docs: `/api/docs`.
   restarting mid-chapter would duplicate prose.
 - **Truncation**: a chapter that stops on `finish_reason == "length"` is continued (up to twice),
   so long chapters do not end mid-sentence.
-- **Plan validation**: the outline is checked (object shape, ≥2 chapters, ≤16 chapters, title
+- **Plan validation**: the outline is checked (object shape, ≥2 chapters, ≤20 chapters, title
   uniqueness, string normalisation) and the specific failure is fed back to the architect for one
   repair attempt before the job errors.
 - **Partial failure**: one failed chapter does not sink the book; the job finishes as `partial`
@@ -397,8 +437,8 @@ Interactive docs: `/api/docs`.
 
 ```bash
 pip install -r requirements-bookwright.txt pytest pymupdf ruff
-BOOKWRIGHT_MOCK_DELAY=0 pytest -q      # 64 tests, no network, no key
-ruff check bookwright server.py
+BOOKWRIGHT_MOCK_DELAY=0 pytest -q      # no network, no key
+ruff check bookwright server.py tests run.py
 ```
 
 ## License

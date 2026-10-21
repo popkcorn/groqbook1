@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import zipfile
@@ -14,7 +15,7 @@ from bookwright.exporters import export, parse_markdown, to_epub, to_markdown
 from bookwright.jobs import BookSpec, Job, chunk_text, estimate, run_book
 from bookwright.llm import Usage
 from bookwright.mock import MockProvider
-from bookwright.schema import PlanError, parse_plan
+from bookwright.schema import Plan, PlanError, parse_plan
 from bookwright.style import length_ratio, paragraph_diff, scan, summary, total
 
 # --------------------------------------------------------------------------- #
@@ -143,7 +144,9 @@ def test_bible_is_carried_between_waves():
     seen: list[str] = []
 
     class Recording(MockProvider):
-        async def write_chapter(self, *, plan, chapter, part_title, bible, style=""):
+        async def write_chapter(
+            self, *, plan, chapter, part_title, bible, style="", pov="", voice_sample=""
+        ):
             seen.append(bible)
             async for event in super().write_chapter(
                 plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style
@@ -164,7 +167,9 @@ def test_bible_is_carried_between_waves():
 
 def test_cancel_marks_job_cancelled():
     class SlowProvider(MockProvider):
-        async def write_chapter(self, *, plan, chapter, part_title, bible, style=""):
+        async def write_chapter(
+            self, *, plan, chapter, part_title, bible, style="", pov="", voice_sample=""
+        ):
             async for event in super().write_chapter(
                 plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style
             ):
@@ -708,6 +713,14 @@ def test_banned_phrases_are_matched_case_insensitively():
     assert scan("clean text", ["banned_phrases"], ["synergy"]) == []
 
 
+def test_banned_list_activates_writer_and_scanner_without_manual_rule_toggle():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard",
+                    directives=["cliches"], banned_phrases=["synergy"])
+    assert "banned_phrases" in spec.clean_directives()
+    assert "'synergy'" in spec.style
+    assert scan("They called it synergy.", spec.clean_directives(), spec.clean_banned())
+
+
 def test_banned_phrases_reach_the_writer_prompt():
     spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard",
                     directives=["banned_phrases"], banned_phrases=["synergy", "  thought  leader "])
@@ -811,6 +824,9 @@ def test_presets_expose_profiles_and_banned_limits():
     assert len(payload["profiles"]) == len(config.EDITORIAL_PROFILES)
     assert payload["profiles"][0]["directives"]
     assert payload["banned_phrases"]["max"] == config.MAX_BANNED_PHRASES
+    assert {p["id"] for p in payload["pov"]["options"]} == set(config.POVS)
+    assert payload["review_outline"]["default"] is False
+    assert payload["review_outline"]["browser_default"] is True
 
 
 def test_profile_expands_server_side_unless_overridden():
@@ -838,3 +854,183 @@ def test_profile_expands_server_side_unless_overridden():
     assert plain == config.DEFAULT_DIRECTIVES
     assert strength == config.DEFAULT_STYLIST_STRENGTH
     assert extra == ""
+
+
+# --------------------------------------------------------------------------- #
+# Grounding, voice, person and outline review
+# --------------------------------------------------------------------------- #
+NOTE_TEXT = "The Halden plant closed in 2019, cutting 480 jobs. Wages fell 6% over three years."
+
+
+def test_notes_reach_the_architect_and_every_chapter_prompt():
+    seen: list[str] = []
+
+    class Recorder(MockProvider):
+        async def plan(self, *, topic, audience, tone, length, notes=""):
+            seen.append(notes)
+            return await super().plan(
+                topic=topic, audience=audience, tone=tone, length=length, notes=notes
+            )
+
+        async def write_chapter(self, *, plan, chapter, part_title, bible, style="",
+                                pov="", voice_sample=""):
+            seen.append(bible)
+            async for event in super().write_chapter(
+                plan=plan, chapter=chapter, part_title=part_title, bible=bible,
+                style=style, pov=pov, voice_sample=voice_sample,
+            ):
+                yield event
+
+    spec = BookSpec(topic="why the plant closed", audience="Reader", tone="clear",
+                    length_id="chapbook", notes=NOTE_TEXT, stylist=False)
+    job = Job(id="notes", spec=spec, provider_name="demo")
+    asyncio.run(run_book(job, spec, Recorder()))
+    assert job.status == "done"
+    assert seen[0] == NOTE_TEXT                      # architect saw the facts
+    assert all("Halden" in bible for bible in seen[1:])  # every chapter prompt carries them
+    assert "unsupported figures" in seen[1].lower()
+
+
+def test_notes_are_capped_and_stripped():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard",
+                    notes="  " + "x" * (config.MAX_NOTES_CHARS + 500) + "  ")
+    assert len(spec.clean_notes()) == config.MAX_NOTES_CHARS
+    assert not spec.clean_notes().startswith(" ")
+
+
+def test_voice_sample_reaches_the_writer_but_not_the_bible():
+    prompts_seen: list[str] = []
+
+    class Recorder(MockProvider):
+        async def write_chapter(self, *, plan, chapter, part_title, bible, style="",
+                                pov="", voice_sample=""):
+            from bookwright import prompts as promptmod
+
+            messages = promptmod.chapter_messages(
+                plan=plan, chapter=chapter, part_title=part_title, bible=bible,
+                style=style, pov=pov, voice_sample=voice_sample,
+            )
+            prompts_seen.append(messages[0]["content"])
+            async for event in super().write_chapter(
+                plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style
+            ):
+                yield event
+
+    sample = "Concrete first. Then the abstraction, briefly, as if it were a cost."
+    spec = BookSpec(topic="a short book on repair", audience="Reader", tone="clear",
+                    length_id="chapbook", voice_sample=sample, stylist=False)
+    asyncio.run(run_book(Job(id="v", spec=spec, provider_name="demo"), spec, Recorder()))
+    assert prompts_seen and all(sample in content for content in prompts_seen)
+    assert all("Do not reuse its phrases" in content for content in prompts_seen)
+
+
+@pytest.mark.parametrize(
+    ("pov", "blocked"),
+    [("first", "no_first_person"), ("we", "no_first_person"), ("you", "no_second_person")],
+)
+def test_pov_drops_the_contradicting_rule(pov, blocked):
+    spec = BookSpec(
+        topic="t", audience="a", tone="clear", length_id="standard", pov=pov,
+        directives=["no_first_person", "no_second_person", "cliches"],
+    )
+    cleaned = spec.clean_directives()
+    assert blocked not in cleaned
+    assert "cliches" in cleaned
+    assert "Grammatical person" in spec.pov_text
+
+
+def test_auto_pov_keeps_both_rules_and_adds_no_instruction():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard",
+                    directives=["no_first_person", "no_second_person"])
+    assert spec.clean_directives() == ["no_first_person", "no_second_person"]
+    assert spec.pov_text == ""
+
+
+def test_outline_review_pauses_before_any_chapter_is_written():
+    spec = BookSpec(topic="the quiet economics of repair", audience="Reader", tone="clear",
+                    length_id="chapbook", review_outline=True, stylist=False)
+    job = Job(id="review", spec=spec, provider_name="demo")
+    started = {"n": 0}
+
+    class Counter(MockProvider):
+        async def write_chapter(self, **kwargs):
+            started["n"] += 1
+            async for event in super().write_chapter(**kwargs):
+                yield event
+
+    async def scenario():
+        task = asyncio.create_task(run_book(job, spec, Counter()))
+        for _ in range(200):
+            if job.status == "awaiting_outline":
+                break
+            await asyncio.sleep(0.01)
+        assert job.status == "awaiting_outline"
+        assert job.busy is False              # parked books don't hold model slots
+        assert job.plan is not None
+        assert started["n"] == 0            # nothing written while parked
+        assert any(e["type"] == "outline_review" for e in job.events)
+
+        # The author renames a chapter and drops another, then approves.
+        edited = job.plan.to_dict()
+        edited["title"] = "The Repair Economy"
+        edited["parts"][0]["chapters"][0]["title"] = "Everything Breaks"
+        edited["parts"][-1]["chapters"].pop()
+        approved = parse_plan(
+            edited, topic=spec.topic, audience=spec.audience, tone=spec.tone,
+            words_per_chapter=spec.length.words_per_chapter,
+        )
+        job.apply_outline(approved)
+        assert job.busy is True
+        with pytest.raises(ValueError):
+            job.apply_outline(approved)        # duplicate approve is rejected
+        await asyncio.wait_for(task, timeout=30)
+        return edited
+
+    asyncio.run(scenario())
+    assert job.status == "done"
+    assert started["n"] == len(job.plan.chapters)   # exactly the approved outline
+    assert job.chapters[1]["title"] == "Everything Breaks"
+    assert job.plan.title == "The Repair Economy"
+
+
+def test_cancelling_a_parked_outline_does_not_hang():
+    spec = BookSpec(topic="the quiet economics of repair", audience="Reader", tone="clear",
+                    length_id="chapbook", review_outline=True, stylist=False)
+    job = Job(id="parked", spec=spec, provider_name="demo")
+
+    async def scenario():
+        task = asyncio.create_task(run_book(job, spec, MockProvider()))
+        for _ in range(200):
+            if job.status == "awaiting_outline":
+                break
+            await asyncio.sleep(0.01)
+        job.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=10)
+
+    asyncio.run(scenario())
+    assert job.status == "cancelled"
+
+
+def test_apply_outline_refuses_when_not_waiting():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard")
+    job = Job(id="x", spec=spec, provider_name="demo")
+    with pytest.raises(ValueError):
+        job.apply_outline(Plan(title="T", subtitle="", thesis="", audience="a",
+                               voice="", parts=[]))
+
+
+def test_outline_request_fields_validate():
+    from pydantic import ValidationError
+
+    from server import BookRequest
+
+    req = BookRequest(
+        topic="a decent topic", notes="  " + NOTE_TEXT + "  ", pov="you",
+        voice_sample="  Short. Blunt.  ", review_outline=True,
+    )
+    assert req.notes == NOTE_TEXT
+    assert req.voice_sample == "Short. Blunt."
+    assert req.review_outline is True
+    with pytest.raises(ValidationError):
+        BookRequest(topic="a decent topic", pov="fourth")
