@@ -38,6 +38,7 @@ class BookSpec:
     words_override: int | None = None
     stylist: bool = config.STYLIST_DEFAULT
     stylist_strength: str = config.DEFAULT_STYLIST_STRENGTH
+    banned_phrases: list[str] = field(default_factory=list)
 
     @property
     def length(self) -> config.LengthPreset:
@@ -63,7 +64,7 @@ class BookSpec:
     def style(self) -> str:
         from .prompts import style_block
 
-        return style_block(self.directives, self.extra_instructions)
+        return style_block(self.directives, self.extra_instructions, self.clean_banned())
 
     def clean_directives(self) -> list[str]:
         """Drop unknown ids and de-duplicate, preserving order."""
@@ -72,6 +73,15 @@ class BookSpec:
             if key in config.ANTI_PATTERNS and key not in seen:
                 seen.append(key)
         return seen
+
+    def clean_banned(self) -> list[str]:
+        """Trim, drop empties and duplicates, cap length and count."""
+        seen: list[str] = []
+        for phrase in self.banned_phrases:
+            cleaned = " ".join(str(phrase).split())[: config.BANNED_PHRASE_MAX_CHARS]
+            if cleaned and cleaned.lower() not in {p.lower() for p in seen}:
+                seen.append(cleaned)
+        return seen[: config.MAX_BANNED_PHRASES]
 
     def to_dict(self) -> dict:
         return {
@@ -85,6 +95,7 @@ class BookSpec:
             "extra_instructions": self.extra_instructions,
             "stylist": self.stylist,
             "stylist_strength": self.stylist_strength,
+            "banned_phrases": self.clean_banned(),
         }
 
 
@@ -173,6 +184,7 @@ class Job:
                     "diff": stylemod.paragraph_diff(state["original"], state["text"])
                     if state.get("original")
                     else None,
+                    "reverted": bool(state.get("reverted")),
                 }
                 for index, state in sorted(self.chapters.items())
             ],
@@ -180,6 +192,46 @@ class Job:
             "error": self.error,
             "started_at": self.started_at,
         }
+
+    def revert_chapter(self, index: int) -> bool:
+        """Put the pre-editorial draft back for one chapter."""
+        state = self.chapters.get(index)
+        if not state or not state.get("original"):
+            return False
+        state["text"] = state["original"]
+        state["original"] = None
+        state["diff"] = None
+        state["style_after"] = state["style_before"]
+        state["reverted"] = True
+        self.emit({
+            "type": "chapter_reverted",
+            "index": index,
+            "text": state["text"],
+            "words": len(state["text"].split()),
+            "stats": self.stats(),
+        })
+        return True
+
+    def style_report(self) -> dict:
+        """Residue per rule plus readability, across every finished chapter."""
+        text = "\n\n".join(
+            state["text"] for _, state in sorted(self.chapters.items())
+            if state.get("status") == "done" and state["text"]
+        )
+        if not self.plan:
+            return {"available": False}
+        rules = self.spec.clean_directives()
+        banned = self.spec.clean_banned()
+        report = stylemod.report(text, rules, banned)
+        edited = [s for s in self.chapters.values() if s.get("style_before") is not None]
+        report.update({
+            "available": True,
+            "rules_active": len(rules),
+            "chapters_edited": sum(1 for s in edited if s.get("style_before") != s.get("style_after")),
+            "flags_before": sum(s.get("style_before") or 0 for s in edited),
+            "flags_after": sum(s.get("style_after") or 0 for s in edited),
+        })
+        return report
 
     def cancel(self) -> None:
         self.cancel_event.set()
@@ -357,6 +409,7 @@ async def run_book(job: Job, spec: BookSpec, provider: Provider) -> None:
             "stats": job.stats(),
             "failed": failed,
             "elapsed": round(time.perf_counter() - started, 1),
+            "style_report": job.style_report(),
         })
 
     except asyncio.CancelledError:
@@ -491,7 +544,8 @@ async def _deai_chapter(job: Job, provider: Provider, chapter, spec: BookSpec) -
     if not rules:
         return
 
-    before = stylemod.scan(original, rules)
+    banned = spec.clean_banned()
+    before = stylemod.scan(original, rules, banned)
     before_total = stylemod.total(before)
     threshold = config.STYLIST_STRENGTHS.get(spec.stylist_strength, 3)
     if before_total < threshold:
@@ -509,8 +563,11 @@ async def _deai_chapter(job: Job, provider: Provider, chapter, spec: BookSpec) -
     rules_text = prompts.style_block(rules)
     rewritten: list[str] = []
     usage = Usage()
+    budget = config.STYLIST_CHUNK_BUDGET.get(spec.stylist_strength, 4)
     for chunk in chunk_text(original):
-        flagged = stylemod.scan(chunk, rules)
+        if budget and budget <= 0:
+            break
+        flagged = stylemod.scan(chunk, rules, banned)
         if stylemod.total(flagged) < 1:
             rewritten.append(chunk)
             continue
@@ -527,6 +584,8 @@ async def _deai_chapter(job: Job, provider: Provider, chapter, spec: BookSpec) -
             continue
         usage.merge(chunk_usage)
         rewritten.append(text.strip())
+        if budget:
+            budget -= 1
     _merge(job, usage)
 
     candidate = "\n\n".join(part for part in rewritten if part).strip()
@@ -543,7 +602,7 @@ async def _deai_chapter(job: Job, provider: Provider, chapter, spec: BookSpec) -
         })
         return
 
-    after = stylemod.scan(candidate, rules)
+    after = stylemod.scan(candidate, rules, banned)
     after_total = stylemod.total(after)
     if after_total >= before_total:
         job.emit({

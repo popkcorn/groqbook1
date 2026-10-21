@@ -53,6 +53,10 @@ class BookRequest(BaseModel):
     extra_instructions: str = Field(default="", max_length=config.MAX_EXTRA_INSTRUCTIONS)
     stylist: bool = config.STYLIST_DEFAULT
     stylist_strength: str = config.DEFAULT_STYLIST_STRENGTH
+    banned_phrases: list[str] = Field(
+        default_factory=list, max_length=config.MAX_BANNED_PHRASES
+    )
+    profile: str | None = None
 
     @field_validator("topic")
     @classmethod
@@ -77,6 +81,23 @@ class BookRequest(BaseModel):
             raise ValueError(f"unknown style directive(s): {', '.join(unknown)}")
         return list(dict.fromkeys(value))
 
+    @field_validator("banned_phrases")
+    @classmethod
+    def _clean_banned(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for phrase in value:
+            phrase = " ".join(str(phrase).split())[: config.BANNED_PHRASE_MAX_CHARS]
+            if phrase and phrase.lower() not in {p.lower() for p in cleaned}:
+                cleaned.append(phrase)
+        return cleaned[: config.MAX_BANNED_PHRASES]
+
+    @field_validator("profile")
+    @classmethod
+    def _known_profile(cls, value: str | None) -> str | None:
+        if value is not None and value not in config.EDITORIAL_PROFILES:
+            raise ValueError(f"unknown profile: {value}")
+        return value
+
     @field_validator("stylist_strength")
     @classmethod
     def _known_strength(cls, value: str) -> str:
@@ -95,6 +116,29 @@ class BookRequest(BaseModel):
         if value not in config.TONES:
             raise ValueError(f"unknown tone: {value}")
         return value
+
+
+def expand_profile(payload: BookRequest) -> tuple[list[str], str, str]:
+    """Apply an editorial profile unless the caller set a field explicitly.
+
+    Without this, a profile sent by an API client would be accepted and then
+    ignored, because the browser was doing the expansion.
+    """
+    directives = payload.directives
+    strength = payload.stylist_strength
+    extra = payload.extra_instructions
+    if not payload.profile:
+        return directives, strength, extra
+
+    profile = config.EDITORIAL_PROFILES[payload.profile]
+    explicit = payload.model_fields_set
+    if "directives" not in explicit:
+        directives = list(profile["directives"])
+    if "stylist_strength" not in explicit:
+        strength = profile["strength"]
+    if "extra_instructions" not in explicit and not extra.strip():
+        extra = profile["extra"]
+    return directives, strength, extra
 
 
 def _client_key(request: Request, body_key: str | None = None) -> str:
@@ -144,17 +188,19 @@ async def create_book(payload: BookRequest, request: Request) -> JSONResponse:
     if api_key and not api_key.startswith("gsk_"):
         raise HTTPException(400, "that does not look like a Groq API key (expected gsk_...)")
 
+    directives, strength, extra = expand_profile(payload)
     spec = BookSpec(
         topic=payload.topic,
         audience=payload.audience,
         tone=payload.tone,
         length_id=payload.length,
-        directives=payload.directives,
-        extra_instructions=payload.extra_instructions,
+        directives=directives,
+        extra_instructions=extra,
         chapters_override=payload.chapters,
         words_override=payload.words_per_chapter,
         stylist=payload.stylist,
-        stylist_strength=payload.stylist_strength,
+        stylist_strength=strength,
+        banned_phrases=payload.banned_phrases,
     )
     provider = _provider(api_key)
     job = store.create(spec, provider)
@@ -182,6 +228,28 @@ async def get_book(job_id: str) -> dict:
     if not job:
         raise HTTPException(404, "no such book")
     return job.snapshot()
+
+
+@app.get("/api/books/{job_id}/style-report")
+async def style_report(job_id: str) -> dict:
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(404, "no such book")
+    return job.style_report()
+
+
+@app.post("/api/books/{job_id}/chapters/{index}/revert")
+async def revert_chapter(job_id: str, index: int) -> dict:
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(404, "no such book")
+    if not job.revert_chapter(index):
+        raise HTTPException(409, "that chapter has no editorial rewrite to undo")
+    return {
+        "ok": True,
+        "text": job.chapters[index]["text"],
+        "report": job.style_report(),
+    }
 
 
 @app.post("/api/books/{job_id}/cancel")

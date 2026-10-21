@@ -174,6 +174,57 @@ ANTI_PATTERNS: dict[str, tuple[str, str]] = {
         "No 'I'",
         "Do not use the first person singular. No anecdotes about the author.",
     ),
+    "intensifiers": (
+        "Empty intensifiers",
+        "Cut 'very', 'really', 'quite', 'actually', 'simply', 'basically' and 'literally'. "
+        "If the sentence needs one, the adjective is wrong.",
+    ),
+    "corporate_verbs": (
+        "Corporate verbs",
+        "Never use 'leverage', 'utilise/utilize', 'facilitate', 'optimise/optimize', 'streamline', "
+        "'synergise/synergize' or 'action' as a verb. Use the ordinary verb.",
+    ),
+    "superlatives": (
+        "'One of the most…'",
+        "Do not use 'one of the most', 'the most important thing', 'arguably the best', or any "
+        "unearned superlative. Give the ranking or drop the claim.",
+    ),
+    "expletives": (
+        "'There is / there are'",
+        "Avoid starting sentences with 'There is', 'There are' or 'It is' as filler. "
+        "Put the real subject first.",
+    ),
+    "the_fact_that": (
+        "'The fact that'",
+        "Never write 'the fact that', 'due to the fact that' or 'in spite of the fact that'. "
+        "Use 'that', 'because' or 'although'.",
+    ),
+    "wordy_connectives": (
+        "Wordy connectives",
+        "Replace 'in order to' with 'to', 'prior to' with 'before', 'in the event that' with 'if', "
+        "and 'a large number of' with 'many'.",
+    ),
+    "rhetorical_questions": (
+        "Questions in the body",
+        "Ask no questions in the prose. A question is an argument the writer has not made.",
+    ),
+    "anaphora": (
+        "Repeated sentence openers",
+        "Do not start three consecutive sentences with the same word or construction.",
+    ),
+    "adverb_density": (
+        "Adverb density",
+        "Use at most one '-ly' adverb per paragraph, and none directly after a reporting verb.",
+    ),
+    "flourish_metaphors": (
+        "Flourish metaphors",
+        "Never call anything a 'journey', 'labyrinth', 'symphony', 'dance', 'bridge' (as metaphor), "
+        "'double-edged sword' or 'rabbit hole'.",
+    ),
+    "banned_phrases": (
+        "Your banned phrases",
+        "Never use any of the words or phrases on the author's own banned list.",
+    ),
 }
 
 # --- De-AI editorial pass ------------------------------------------------- #
@@ -181,15 +232,101 @@ ANTI_PATTERNS: dict[str, tuple[str, str]] = {
 # offending passages. "light" touches chunks with a handful of flags; "full"
 # rewrites any chunk with at least one.
 STYLIST_DEFAULT = True
-STYLIST_STRENGTHS = {"light": 3, "full": 1}  # strength -> minimum flags to act
-DEFAULT_STYLIST_STRENGTH = "light"
+# intensity -> minimum flags in a chapter before the pass acts at all
+STYLIST_STRENGTHS = {"gentle": 5, "standard": 2, "aggressive": 1}
+DEFAULT_STYLIST_STRENGTH = "standard"
 STYLIST_CHUNK_CHARS = 5_000
 STYLIST_MAX_CHUNKS = 8
+# How many chunks may be rewritten per chapter, by intensity. Zero means "no
+# limit" for aggressive, so a heavy rewrite is an explicit choice.
+STYLIST_CHUNK_BUDGET = {"gentle": 2, "standard": 4, "aggressive": 0}
 STYLIST_LENGTH_TOLERANCE = (0.6, 1.6)  # reject rewrites outside this ratio
 
 # Sensible default: the tics that most reliably read as machine-written.
 DEFAULT_DIRECTIVES = ["cliches", "not_just", "hedging", "summarising", "uniform_rhythm"]
 MAX_DIRECTIVES = len(ANTI_PATTERNS)
+
+# Editorial profiles bundle rules, intensity and a house-style line, so a
+# complete editorial posture is one click. Anything can still be overridden.
+EDITORIAL_PROFILES: dict[str, dict] = {
+    "anti_ai": {
+        "label": "Anti-AI — strict",
+        "description": "Everything that reads as generated, checked hard.",
+        "directives": [
+            "cliches", "not_just", "rule_of_three", "em_dash", "rhetorical_openers",
+            "hedging", "summarising", "uniform_rhythm", "grandiosity", "question_headers",
+            "listicles", "intensifiers", "corporate_verbs", "superlatives", "expletives",
+            "the_fact_that", "wordy_connectives", "rhetorical_questions", "anaphora",
+            "adverb_density", "flourish_metaphors",
+        ],
+        "strength": "aggressive",
+        "extra": "",
+    },
+    "plain": {
+        "label": "Plain and tight",
+        "description": "Short sentences, no ornament, no padding.",
+        "directives": [
+            "cliches", "hedging", "summarising", "intensifiers", "corporate_verbs",
+            "wordy_connectives", "the_fact_that", "adverb_density", "flourish_metaphors",
+        ],
+        "strength": "standard",
+        "extra": "Short sentences. One idea per paragraph. No metaphor unless it is exact.",
+    },
+    "literary": {
+        "label": "Literary",
+        "description": "Allows rhythm and metaphor, polices the clichés.",
+        "directives": [
+            "cliches", "not_just", "hedging", "summarising", "grandiosity",
+            "flourish_metaphors", "superlatives",
+        ],
+        "strength": "gentle",
+        "extra": "Vary sentence length deliberately. Metaphor is allowed when it is precise.",
+    },
+    "academic": {
+        "label": "Academic",
+        "description": "Hedging permitted, hype forbidden.",
+        "directives": [
+            "cliches", "not_just", "rule_of_three", "corporate_verbs", "superlatives",
+            "grandiosity", "wordy_connectives", "rhetorical_questions", "no_first_person",
+        ],
+        "strength": "standard",
+        "extra": "Qualify claims precisely. Name the mechanism, not the mood.",
+    },
+    "journalistic": {
+        "label": "Journalistic",
+        "description": "Attribution, active verbs, no adjectives doing the work of facts.",
+        "directives": [
+            "cliches", "not_just", "hedging", "summarising", "intensifiers",
+            "corporate_verbs", "superlatives", "rhetorical_questions", "expletives",
+        ],
+        "strength": "standard",
+        "extra": "Attribute claims to a source. Active voice. Concrete nouns.",
+    },
+    "minimal": {
+        "label": "Minimal",
+        "description": "Bare declaratives; almost nothing decorative survives.",
+        "directives": [
+            "cliches", "not_just", "rule_of_three", "hedging", "summarising",
+            "uniform_rhythm", "grandiosity", "intensifiers", "adverb_density",
+            "flourish_metaphors", "expletives", "wordy_connectives",
+        ],
+        "strength": "aggressive",
+        "extra": "Declarative sentences only. No adjectives without a job.",
+    },
+    "custom": {
+        "label": "Custom",
+        "description": "Set every switch yourself.",
+        "directives": DEFAULT_DIRECTIVES,
+        "strength": "standard",
+        "extra": "",
+    },
+}
+DEFAULT_PROFILE = "anti_ai"
+
+# Author-supplied banned words/phrases, enforced by both the writer prompt and
+# the scan (so the editorial pass can measure them).
+MAX_BANNED_PHRASES = 25
+BANNED_PHRASE_MAX_CHARS = 60
 MAX_EXTRA_INSTRUCTIONS = 400
 
 AUDIENCES = ["Curious general reader", "Practitioner", "Student", "Executive", "Specialist"]
@@ -229,6 +366,22 @@ def presets_payload() -> dict:
             for key, (label, instruction) in ANTI_PATTERNS.items()
         ],
         "default_directives": DEFAULT_DIRECTIVES,
+        "profiles": [
+            {
+                "id": key,
+                "label": profile["label"],
+                "description": profile["description"],
+                "directives": profile["directives"],
+                "strength": profile["strength"],
+                "extra": profile["extra"],
+            }
+            for key, profile in EDITORIAL_PROFILES.items()
+        ],
+        "default_profile": DEFAULT_PROFILE,
+        "banned_phrases": {
+            "max": MAX_BANNED_PHRASES,
+            "max_chars": BANNED_PHRASE_MAX_CHARS,
+        },
         "stylist": {
             "default": STYLIST_DEFAULT,
             "strengths": list(STYLIST_STRENGTHS),

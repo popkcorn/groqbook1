@@ -165,7 +165,7 @@ the architect's plan as well as the prose.
 
 ### Style controls — getting away from "AI voice"
 
-Thirteen switches, each injecting a precise instruction into every chapter prompt
+Twenty-four switches, each injecting a precise instruction into every chapter prompt
 *and* into the continuity bible, so the constraint survives across waves rather
 than drifting after chapter three:
 
@@ -184,11 +184,54 @@ than drifting after chapter three:
 | Bullet-point prose | Lists that should have been paragraphs |
 | No "you" | Second-person address |
 | No "I" | First-person anecdote |
+| Intensifiers | *really, very, quite, absolutely* used as filler |
+| Corporate verbs | *leverage, facilitate, optimise, utilise, streamline* |
+| Superlatives | *the most important, the greatest, one of the best* |
+| Expletives | *there is / there are / it is* openings that bury the actor |
+| "The fact that" | The whole `due to the fact that` family |
+| Wordy connectives | *in order to, in terms of, with regard to* |
+| Rhetorical questions | "Why does this keep happening?" as a paragraph hook |
+| Anaphora | Three consecutive sentences opening on the same word |
+| Adverb density | Adverbs over ~4% of a chapter's words |
+| Flourish metaphors | *a journey, a tapestry, a beacon, an ecosystem of…* |
+| Your banned list | Any word or phrase you type into *Banned phrases* |
 
 Five are on by default (stock phrases, not-just, hedging, recaps, uniform
 rhythm). Below the switches is a free-text **house style** box (400 chars) for
 anything the presets miss — British spelling, no rhetorical questions, name real
 places, and so on.
+
+#### Editorial profiles
+
+One click sets the switches, the intensity and the house-style line together;
+touching any of them afterwards flips the selection to **Custom**, so the chip
+never claims credit for rules you turned off.
+
+| Profile | Rules | Intensity | Aimed at |
+|---|---|---|---|
+| Anti-AI — strict | 21 | aggressive | Default; maximum pattern removal |
+| Plain and tight | 9 | standard | Short sentences, one idea per paragraph |
+| Literary | 7 | gentle | Flourish allowed, tics still banned |
+| Academic | 9 | standard | Hedges kept, hype removed |
+| Journalistic | 9 | standard | Short paragraphs, attribution over claims |
+| Minimal | 12 | aggressive | Only the most obvious machine tells |
+| Custom | your picks | standard | Starting point for hand-tuning |
+
+#### Banned phrases
+
+Up to 25 phrases (60 chars each), one per line or comma separated. They are
+enforced twice: quoted into every chapter prompt as an outright ban, and matched
+case-insensitively by the scanner, so the chapter fails the check if any survive.
+This is the escape hatch for house rules no preset covers — a competitor's name,
+your editor's pet hates, a word that has become a cliché in your field.
+
+#### Intensity
+
+| Setting | Acts when | Rewrite budget | Typical cost |
+|---|---|---|---|
+| Gentle | 5+ flags in a chapter | 2 chunks per chapter | cheapest; leaves light tics alone |
+| Standard | 2+ flags | 4 chunks per chapter | default |
+| Aggressive | any flag | no cap | most calls, best odds of reaching zero |
 
 Everything is passed as data (`config.ANTI_PATTERNS`) so the API, the UI and the
 tests agree on the same catalogue; unknown rule ids are rejected with a 422
@@ -201,7 +244,10 @@ curl -X POST localhost:8000/api/books -H 'content-type: application/json' -d '{
   "tone": "journalistic", "length": "custom",
   "chapters": 9, "words_per_chapter": 1200,
   "directives": ["cliches", "not_just", "em_dash", "no_second_person"],
-  "extra_instructions": "British spelling, no rhetorical questions"
+  "extra_instructions": "British spelling, no rhetorical questions",
+  "profile": "academic",
+  "banned_phrases": ["synergy", "paradigm shift"],
+  "stylist": true, "stylist_strength": "aggressive"
 }'
 ```
 
@@ -218,11 +264,12 @@ draft ──▶ SCAN ──▶ rewrite flagged passages ──▶ RE-SCAN ──
 
 **Scan** (`bookwright/style.py`) is deliberately literal. Each active rule has a detector that
 matches something nameable — stock phrases, em dashes, hedges, recaps — and reports the offending
-excerpts. Two structural checks are computed rather than matched: runs of four same-length
-sentences, and bullet-point prose over eight items.
+excerpts. Three checks are computed rather than matched: runs of four same-length sentences,
+bullet-point prose over eight items, and adverb density over a chapter's worth of words.
 
 **Rewrite** only touches chunks that contain a flag, so a clean chapter costs nothing. Chunks are
-split on paragraph boundaries (~5,000 chars) and capped at eight per chapter.
+split on paragraph boundaries (~5,000 chars) and capped by the intensity setting (2 / 4 / unlimited
+per chapter).
 
 **Three guards** decide whether the result ships:
 
@@ -236,20 +283,33 @@ A chapter is never lost to the editorial pass, and the draft is retained as `ori
 show exactly what changed. Detection also only polices the rules **you enabled** — turning off
 "Stock phrases" both stops the instruction and stops the check.
 
-In the app: **Editorial de-AI pass** toggles it (on by default), with `Light` (3+ flags) or `Full`
-(any flag) strength. Each edited chapter shows a *"7 de-AI fixes"* badge and a **See changes**
-button that opens a paragraph-level before/after diff. Unchanged paragraphs are hidden.
+In the app: **Editorial de-AI pass** toggles it (on by default), with `Gentle` / `Standard` /
+`Aggressive` intensity. Each edited chapter shows a *"7 de-AI fixes"* badge, a **See changes**
+button that opens a paragraph-level before/after diff (unchanged paragraphs hidden), and **Undo
+edits**, which puts that one chapter's pre-editorial draft back without touching the rest.
+
+#### The style report
+
+When a book finishes, the app reports what the editorial stage actually achieved:
+
+- **patterns left** and **fixed by the editor** — residue and total reduction, book-wide;
+- a bar per remaining rule, so you can see which tic survived;
+- readability: Flesch reading ease, grade level, mean sentence length, adverbs per 100 words.
+
+It is computed by re-running the same detectors over the finished text, so it cannot flatter the
+editor — a rule that still fires still shows up. `GET /api/books/{id}/style-report` returns the
+same numbers as JSON.
 
 ```bash
 curl -X POST localhost:8000/api/books -H 'content-type: application/json' -d '{
   "topic": "why maintenance is the real design problem",
   "length": "standard",
-  "stylist": true, "stylist_strength": "full"
+  "stylist": true, "stylist_strength": "aggressive"
 }'
 ```
 
-Cost: one extra editor-model call per flagged chunk, usually one per chapter. `light` skips
-chapters with fewer than three flags, which is most of them on a capable model.
+Cost: one extra editor-model call per flagged chunk, usually one per chapter. `gentle` skips
+chapters with fewer than five flags, which is most of them on a capable model.
 
 ## Layout
 
@@ -283,7 +343,9 @@ main.py          the original Groqbook app, unchanged, for reference
 | `GET` | `/api/presets` | Lengths, tones, audiences, limits |
 | `POST` | `/api/books` | Start a book; returns `id` + token estimate |
 | `GET` | `/api/books/{id}` | Full snapshot (plan, chapters, stats) |
-| `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `stylist_start`, `stylist_done`, `stylist_rejected`, `chapter_drafted`, `chapter_done`, `done`, `error` |
+| `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `stylist_start`, `stylist_done`, `stylist_rejected`, `chapter_reverted`, `chapter_drafted`, `chapter_done`, `done`, `error` |
+| `GET` | `/api/books/{id}/style-report` | Residue per rule, flags fixed, readability |
+| `POST` | `/api/books/{id}/chapters/{n}/revert` | Undo the editorial edits on one chapter |
 | `POST` | `/api/books/{id}/cancel` | Stop; keeps what was written |
 | `GET` | `/api/books/{id}/export/{md\|html\|epub\|pdf}` | Download |
 
@@ -321,6 +383,8 @@ Interactive docs: `/api/docs`.
 - No auth or per-user quota. Run it for yourself or behind your own gateway.
 - Content is model output. Quality depends entirely on the routed models, and claims should be
   verified before anyone relies on them.
+- The style report counts pattern residue, not quality. Readability scores reward short sentences;
+  prose that scores well can still be empty.
 - The de-AI pass fixes surface patterns, not substance. It cannot add evidence, fix a wrong claim,
   or improve an argument — by design, it is forbidden from rewriting anything but flagged sentences.
 - Long books are slow by design: chapters run in waves of 3 and each wave waits for its

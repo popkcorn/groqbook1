@@ -37,7 +37,9 @@ PLAN_JSON_SHAPE = """{
 }"""
 
 
-def style_block(directives: list[str], extra: str = "") -> str:
+def style_block(
+    directives: list[str], extra: str = "", banned_phrases: list[str] | None = None
+) -> str:
     """Render the anti-pattern controls into prompt lines.
 
     Only ids present in config.ANTI_PATTERNS are honoured, so the API can never
@@ -51,6 +53,10 @@ def style_block(directives: list[str], extra: str = "") -> str:
     extra = (extra or "").strip()
     if extra:
         lines.append(f"- House style, from the author: {extra[: config.MAX_EXTRA_INSTRUCTIONS]}")
+    phrases = [p.strip() for p in (banned_phrases or []) if p.strip()]
+    if "banned_phrases" in directives and phrases:
+        quoted = ", ".join(f"'{p}'" for p in phrases[: config.MAX_BANNED_PHRASES])
+        lines.append(f"- These words and phrases are banned outright: {quoted}")
     return "\n".join(lines)
 
 

@@ -15,6 +15,8 @@
     mode: "demo",
     length: "standard",
     directives: [],
+    banned: [],
+    profile: null,
     preset: null,
     job: null,
     plan: null,
@@ -223,6 +225,42 @@
     chap.addEventListener("input", syncCustom);
     words.addEventListener("input", syncCustom);
 
+    // Editorial profiles
+    const profiles = $("#profiles");
+    const setProfile = (id) => {
+      state.profile = id;
+      [...profiles.children].forEach((c) =>
+        c.setAttribute("aria-checked", String(c.dataset.id === id)));
+    };
+    presets.profiles.forEach((profile) => {
+      const chip = el("button", "profile-chip", profile.label);
+      chip.type = "button";
+      chip.dataset.id = profile.id;
+      chip.title = profile.description;
+      chip.setAttribute("role", "radio");
+      chip.setAttribute("aria-checked", "false");
+      chip.addEventListener("click", () => {
+        setProfile(profile.id);
+        applyProfile(profile, presets);
+      });
+      profiles.append(chip);
+    });
+    setProfile(presets.default_profile || "custom");
+    // Any hand-edit of the switches/strength means the profile no longer applies.
+    const markCustom = () => {
+      if (state.profile !== "custom") setProfile("custom");
+    };
+
+    // Banned phrases
+    const banned = $("#banned-phrases");
+    const parseBanned = () => banned.value
+      .split(/[\n,]/).map((v) => v.trim()).filter(Boolean);
+    banned.addEventListener("input", () => {
+      state.banned = parseBanned().slice(0, presets.banned_phrases.max);
+      $("#banned-count").textContent = state.banned.length;
+      updateEstimate(presets);
+    });
+
     // Style toggles
     const toggles = $("#anti-patterns");
     const defaults = new Set(presets.default_directives || []);
@@ -237,6 +275,7 @@
       label.append(input, text);
       input.addEventListener("change", () => {
         state.directives = [...toggles.querySelectorAll("input:checked")].map((i) => i.value);
+        markCustom();
         paintStyleCount();
         updateEstimate(presets);
       });
@@ -248,6 +287,7 @@
     const extra = $("#extra-instructions");
     extra.addEventListener("input", () => {
       $("#extra-count").textContent = extra.value.length;
+      markCustom();
       updateEstimate(presets);
     });
 
@@ -255,13 +295,16 @@
     const stylistStrength = $("#stylist-strength");
     if (presets.stylist) {
       stylistOn.checked = Boolean(presets.stylist.default);
-      stylistStrength.value = presets.stylist.default_strength || "light";
+      stylistStrength.value = presets.stylist.default_strength || "standard";
     }
     stylistOn.addEventListener("change", () => {
       stylistStrength.disabled = !stylistOn.checked;
       updateEstimate(presets);
     });
-    stylistStrength.addEventListener("change", () => updateEstimate(presets));
+    stylistStrength.addEventListener("change", () => {
+      markCustom();
+      updateEstimate(presets);
+    });
 
     updateEstimate(presets);
   }
@@ -280,12 +323,29 @@
     if (state.directives.length) styleBits.push(`${state.directives.length} style rules`);
     const extra = $("#extra-instructions").value.trim();
     if (extra) styleBits.push("house style");
-    if ($("#stylist-on").checked) styleBits.push("de-AI pass");
+    if ($("#stylist-on").checked) styleBits.push(`de-AI pass (${$("#stylist-strength").value})`);
+    if (state.banned.length) styleBits.push(`${state.banned.length} banned phrases`);
     const suffix = styleBits.length ? ` · ${styleBits.join(" + ")}` : "";
     const words = compact(p.total_words);
     $("#estimate").textContent = state.key
       ? `Live mode · ${p.chapters} chapters, about ${words} words of output${suffix}.`
       : `Demo mode · ${p.chapters} chapters of fixture prose${suffix}. Add a Groq key for real writing.`;
+  }
+
+  function applyProfile(profile, presets) {
+    const wanted = new Set(profile.directives);
+    window.document.querySelectorAll("#anti-patterns input").forEach((input) => {
+      input.checked = wanted.has(input.value);
+    });
+    state.directives = [...wanted].filter((id) =>
+      window.document.querySelector(`#anti-patterns input[value="${id}"]`));
+    $("#stylist-strength").value = profile.strength || "standard";
+    if (profile.extra && !$("#extra-instructions").value.trim()) {
+      $("#extra-instructions").value = profile.extra;
+      $("#extra-count").textContent = profile.extra.length;
+    }
+    paintStyleCount();
+    updateEstimate(presets);
   }
 
   function paintStyleCount() {
@@ -353,6 +413,8 @@
     }
     payload.stylist = $("#stylist-on").checked;
     payload.stylist_strength = $("#stylist-strength").value;
+    payload.banned_phrases = state.banned;
+    payload.profile = state.profile || null;
     return payload;
   }
 
@@ -446,6 +508,18 @@
       applyStats(data.stats);
     });
 
+    stream.addEventListener("chapter_reverted", (e) => {
+      const data = JSON.parse(e.data);
+      const chapter = state.chapters.get(data.index);
+      if (!chapter) return;
+      chapter.diff = null;
+      chapter.fixes = 0;
+      chapter.reverted = true;
+      chapter.original = null;
+      if (data.text) chapter.text = data.text;
+      renderChapter(data.index, true);
+    });
+
     stream.addEventListener("stylist_rejected", (e) => {
       const data = JSON.parse(e.data);
       toast(`Editorial pass skipped chapter ${data.index}: ${data.reason}`, 7000);
@@ -479,6 +553,7 @@
       setStatus(label);
       markRunDone(data.status === "partial" ? "error" : "done");
       applyStats(data.stats);
+      if (data.style_report) renderStyleReport(data.style_report);
       closeStream();
       paintToc();
     });
@@ -524,6 +599,8 @@
     $("#book").innerHTML = "";
     $("#empty").hidden = false;
     $("#toc-list").innerHTML = "";
+    $("#report").hidden = true;
+    $("#r-residue").replaceChildren();
     $("#rail span").style.width = "0%";
     $("#meter-fill").style.width = "0%";
     markRunDone(null);
@@ -541,6 +618,7 @@
         local.original = chapter.original || null;
         local.diff = chapter.diff || null;
         local.fixes = Math.max(0, (chapter.style_before || 0) - (chapter.style_after || 0));
+        local.reverted = Boolean(chapter.reverted);
         renderChapter(chapter.index, true);
       }
       paintToc();
@@ -567,7 +645,7 @@
     const chapter = {
       index, title: title || `Chapter ${index}`, text: "", status: "pending", summary: "",
       words: 0, node: null, bodyNode: null,
-      original: null, diff: null, fixes: 0, diffOpen: false,
+      original: null, diff: null, fixes: 0, diffOpen: false, reverted: false,
     };
     state.chapters.set(index, chapter);
     return chapter;
@@ -679,6 +757,7 @@
     if (!foot) return;
     foot.querySelector(".fixes")?.remove();
     foot.querySelector(".diff-btn")?.remove();
+    foot.querySelector(".revert-btn")?.remove();
     if (chapter.fixes > 0) {
       foot.prepend(el("span", "fixes", `${chapter.fixes} de-AI fix${chapter.fixes === 1 ? "" : "es"}`));
     }
@@ -689,7 +768,14 @@
         chapter.diffOpen = !chapter.diffOpen;
         renderChapter(chapter.index, true);
       });
-      foot.prepend(btn);
+      const revert = el("button", "revert-btn", "Undo edits");
+      revert.type = "button";
+      revert.title = "Put the pre-editorial draft back for this chapter";
+      revert.addEventListener("click", () => revertChapter(chapter.index));
+      foot.prepend(btn, revert);
+    }
+    if (chapter.reverted) {
+      foot.prepend(el("span", "fixes", "editorial edits undone"));
     }
   }
 
@@ -712,6 +798,27 @@
     if (!shown) parts.push('<p class="diff-note">No paragraph-level changes.</p>');
     parts.push("</div>");
     return parts.join("");
+  }
+
+  async function revertChapter(index) {
+    if (!state.job) return;
+    try {
+      const res = await fetch(`/api/books/${state.job}/chapters/${index}/revert`, { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || `revert failed (${res.status})`);
+      const chapter = state.chapters.get(index);
+      if (chapter && body.text) chapter.text = body.text;
+      if (chapter) {
+        chapter.diff = null;
+        chapter.fixes = 0;
+        chapter.reverted = true;
+        chapter.original = null;
+        renderChapter(index, true);
+      }
+      if (body.report) renderStyleReport(body.report);
+    } catch (err) {
+      toast(err.message);
+    }
   }
 
   const escapeText = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -747,6 +854,35 @@
       }
     }
     list.replaceChildren(frag);
+  }
+
+  function renderStyleReport(report) {
+    if (!report || !report.available) return;
+    $("#report").hidden = false;
+    $("#r-flags").textContent = report.total ?? 0;
+    const fixed = Math.max(0, (report.flags_before || 0) - (report.flags_after || 0));
+    $("#r-fixed").textContent = fixed;
+    const read = report.readability || {};
+    $("#r-ease").textContent = read.flesch_ease !== undefined ? `${read.flesch_ease}` : "—";
+    $("#r-grade").textContent = read.grade_level !== undefined ? `${read.grade_level}` : "—";
+    $("#r-sentence").textContent = read.avg_sentence_words ? `${read.avg_sentence_words}w` : "—";
+    $("#r-adverbs").textContent = read.adverbs_per_100_words !== undefined ? `${read.adverbs_per_100_words}` : "—";
+
+    const list = $("#r-residue");
+    list.replaceChildren();
+    const byRule = report.by_rule || {};
+    const entries = Object.entries(byRule).sort((a, b) => b[1] - a[1]);
+    const max = entries.length ? entries[0][1] : 1;
+    for (const [rule, count] of entries) {
+      const li = el("li");
+      li.append(
+        el("span", "name", rule.replace(/_/g, " ")),
+        (() => { const bar = el("span", "bar"); const fill = el("span"); fill.style.width = `${Math.round((count / max) * 100)}%`; bar.append(fill); return bar; })(),
+        el("span", "n", String(count))
+      );
+      list.append(li);
+    }
+    $("#r-empty").hidden = entries.length > 0;
   }
 
   function setStatus(text) {

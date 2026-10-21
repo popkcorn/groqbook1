@@ -25,7 +25,7 @@ WORD = re.compile(r"[A-Za-z']+")
 BULLET = re.compile(r"(?m)^\s*[-*]\s+\S")
 
 # Structural checks are computed rather than matched by regex.
-STRUCTURAL_RULES = ("uniform_rhythm", "listicles")
+STRUCTURAL_RULES = ("uniform_rhythm", "listicles", "anaphora", "adverb_density")
 
 # rule id -> (pattern, human description for the diff/prompt)
 DETECTORS: dict[str, tuple[re.Pattern, str]] = {
@@ -93,10 +93,67 @@ DETECTORS: dict[str, tuple[re.Pattern, str]] = {
         "second-person address",
     ),
     "no_first_person": (re.compile(r"\b(I|me|my|mine|myself)\b"), "first-person address"),
+    "intensifiers": (
+        re.compile(r"\b(very|really|quite|actually|simply|basically|literally|truly)\b", re.IGNORECASE),
+        "empty intensifier",
+    ),
+    "corporate_verbs": (
+        re.compile(
+            r"\b(leverage[ds]?|leveraging|utili[sz](e|ed|ing)|facilitat(e|ed|ing)|"
+            r"optimi[sz](e|ed|ing)|streamlin(e|ed|ing)|synergi[sz](e|ed|ing))\b",
+            re.IGNORECASE,
+        ),
+        "corporate verb",
+    ),
+    "superlatives": (
+        re.compile(
+            r"\b(one of the most|the most important thing|the greatest|"
+            r"the best way to|the single most)\b",
+            re.IGNORECASE,
+        ),
+        "unearned superlative",
+    ),
+    "expletives": (
+        re.compile(
+            r"(?m)(?:^|(?<=[.!?])\s)(?:There (?:is|are|was|were)|It is (?:important|clear|obvious|"
+            r"interesting|worth noting))\b",
+            re.IGNORECASE,
+        ),
+        "'there is / it is' filler",
+    ),
+    "the_fact_that": (
+        re.compile(
+            r"\b(the fact that|due to the fact that|in spite of the fact that|"
+            r"regardless of the fact that)\b",
+            re.IGNORECASE,
+        ),
+        "'the fact that' padding",
+    ),
+    "wordy_connectives": (
+        re.compile(
+            r"\b(in order to|prior to|in the event that|a large number of|"
+            r"at this point in time|in light of the fact)\b",
+            re.IGNORECASE,
+        ),
+        "wordy connective",
+    ),
+    "rhetorical_questions": (
+        re.compile(r"(?m)^(?!#)[^\n?.]{4,}\?\s*$"),
+        "question in the body",
+    ),
+    "flourish_metaphors": (
+        re.compile(
+            r"\b(a journey|the journey|a labyrinth|the labyrinth|a symphony|the symphony|"
+            r"a double-edged sword|the double-edged sword|a rabbit hole|bridge the gap|"
+            r"a dance between|the dance of)\b",
+            re.IGNORECASE,
+        ),
+        "flourish metaphor",
+    ),
 }
 
 
-ALL_RULES: tuple[str, ...] = (*DETECTORS, *STRUCTURAL_RULES)
+ALL_RULES: tuple[str, ...] = (*DETECTORS, *STRUCTURAL_RULES, "banned_phrases")
 
 
 @dataclass
@@ -146,7 +203,44 @@ def _listicles(text: str) -> Finding | None:
     return Finding("listicles", bullets, "bullet-point prose")
 
 
-def scan(text: str, rules: list[str] | None = None) -> list[Finding]:
+DETERMINERS = {
+    "the", "a", "an", "this", "that", "these", "those", "it", "there", "and", "but",
+    "so", "then", "if", "when", "as", "in", "on", "at", "for", "to", "of", "with", "its",
+}
+
+
+def _anaphora(text: str) -> Finding | None:
+    """Three consecutive sentences opening with the same word."""
+    openers: list[str] = []
+    for sentence in SENTENCE_SPLIT.split(text):
+        words = [w.lower() for w in WORD.findall(sentence)]
+        content = next((w for w in words if w not in DETERMINERS), "")
+        openers.append(content)
+    runs = 0
+    for i in range(len(openers) - 2):
+        window = openers[i : i + 3]
+        if window[0] and len(set(window)) == 1:
+            runs += 1
+    if not runs:
+        return None
+    return Finding("anaphora", runs, "repeated sentence openers")
+
+
+def _adverb_density(text: str) -> Finding | None:
+    words = WORD.findall(text)
+    if len(words) < 80:
+        return None
+    adverbs = [w for w in words if w.lower().endswith("ly") and len(w) > 4]
+    if len(adverbs) < 5 or len(adverbs) / len(words) < 0.025:
+        return None
+    return Finding("adverb_density", len(adverbs), "'-ly' adverbs in bulk")
+
+
+def scan(
+    text: str,
+    rules: list[str] | None = None,
+    banned_phrases: list[str] | None = None,
+) -> list[Finding]:
     """Find violations of `rules` (default: every rule) in `text`."""
     if not text.strip():
         return []
@@ -162,6 +256,29 @@ def scan(text: str, rules: list[str] | None = None) -> list[Finding]:
             found = _listicles(text)
             if found:
                 findings.append(found)
+            continue
+        if rule == "anaphora":
+            found = _anaphora(text)
+            if found:
+                findings.append(found)
+            continue
+        if rule == "adverb_density":
+            found = _adverb_density(text)
+            if found:
+                findings.append(found)
+            continue
+        if rule == "banned_phrases":
+            hits = banned_hits(text, banned_phrases or [])
+            if hits:
+                excerpts = []
+                lowered = text.lower()
+                for phrase in hits[:3]:
+                    index = lowered.find(phrase.lower())
+                    if index >= 0:
+                        start = max(0, index - 46)
+                        end = min(len(text), index + len(phrase) + 46)
+                        excerpts.append(("…" if start else "") + text[start:end].strip() + ("…" if end < len(text) else ""))
+                findings.append(Finding("banned_phrases", len(hits), "banned phrase", excerpts))
             continue
         detector = DETECTORS.get(rule)
         if detector is None:
@@ -179,6 +296,67 @@ def scan(text: str, rules: list[str] | None = None) -> list[Finding]:
 
     findings.sort(key=lambda f: f.count, reverse=True)
     return findings
+
+
+def banned_hits(text: str, phrases: list[str]) -> list[str]:
+    """Case-insensitive occurrences of the author's own banned phrases."""
+    lowered = text.lower()
+    return [phrase for phrase in phrases if phrase and phrase.lower() in lowered]
+
+
+# --------------------------------------------------------------------------- #
+# Readability — reported alongside the pattern residue
+# --------------------------------------------------------------------------- #
+VOWEL_GROUP = re.compile(r"[aeiouy]+", re.IGNORECASE)
+
+
+def _syllables(word: str) -> int:
+    count = len(VOWEL_GROUP.findall(word))
+    if word.lower().endswith("e") and count > 1:
+        count -= 1
+    return max(1, count)
+
+
+def readability(text: str) -> dict:
+    """Flesch reading ease, grade level and the raw counts behind them."""
+    sentences = [s for s in SENTENCE_SPLIT.split(text) if s.strip()]
+    words = WORD.findall(text)
+    paragraphs = [p for p in PARAGRAPH.split(text) if p.strip()]
+    if not sentences or not words:
+        return {
+            "sentences": 0, "words": 0, "paragraphs": 0,
+            "avg_sentence_words": 0.0, "avg_paragraph_words": 0.0,
+            "lexical_variety": 0.0, "flesch_ease": 0.0, "grade_level": 0.0,
+            "adverbs_per_100_words": 0.0,
+        }
+    syllables = sum(_syllables(w) for w in words)
+    words_per_sentence = len(words) / len(sentences)
+    syllables_per_word = syllables / len(words)
+    ease = 206.835 - 1.015 * words_per_sentence - 84.6 * syllables_per_word
+    grade = 0.39 * words_per_sentence + 11.8 * syllables_per_word - 15.59
+    adverbs = [w for w in words if w.lower().endswith("ly") and len(w) > 4]
+    return {
+        "sentences": len(sentences),
+        "words": len(words),
+        "paragraphs": len(paragraphs),
+        "avg_sentence_words": round(words_per_sentence, 1),
+        "avg_paragraph_words": round(len(words) / len(paragraphs), 1),
+        "lexical_variety": round(len({w.lower() for w in words}) / len(words), 3),
+        "flesch_ease": round(max(0.0, min(120.0, ease)), 1),
+        "grade_level": round(max(0.0, grade), 1),
+        "adverbs_per_100_words": round(len(adverbs) / len(words) * 100, 1),
+    }
+
+
+def report(text: str, rules: list[str], banned_phrases: list[str] | None = None) -> dict:
+    """Everything the style panel needs for one text."""
+    findings = scan(text, rules, banned_phrases)
+    return {
+        "total": total(findings),
+        "by_rule": summary(findings),
+        "findings": [f.to_dict() for f in findings],
+        "readability": readability(text),
+    }
 
 
 def total(findings: list[Finding]) -> int:

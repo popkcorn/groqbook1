@@ -67,8 +67,9 @@
           <span>Style controls</span>
           <span class="style-count" id="style-count">5 active</span>
         </summary>
-        <p class="hint panel-hint">Switch off the patterns you don't want in the prose. These go
-          into every chapter prompt and are repeated in the continuity bible.</p>
+        <div class="profiles" id="profiles" role="radiogroup" aria-label="Editorial profile"></div>
+        <p class="hint panel-hint">Profiles set the switches, intensity and house style at once.
+          Everything below stays editable.</p>
         <div class="toggles" id="anti-patterns"></div>
         <div class="stylist-row">
           <label class="toggle stylist-toggle">
@@ -80,13 +81,21 @@
             </span>
           </label>
           <label class="mini stylist-strength">
-            <span>Strength</span>
+            <span>Intensity</span>
             <select id="stylist-strength">
-              <option value="light">Light — 3+ flags</option>
-              <option value="full">Full — any flag</option>
+              <option value="gentle">Gentle — 5+ flags</option>
+              <option value="standard" selected>Standard — 2+ flags</option>
+              <option value="aggressive">Aggressive — any flag</option>
             </select>
           </label>
         </div>
+
+        <label class="field extra-field banned-field">
+          <span class="label">Banned words and phrases</span>
+          <textarea id="banned-phrases" rows="2" maxlength="600"
+            placeholder="synergy, paradigm shift, thought leader — one per line or comma separated"></textarea>
+          <span class="hint"><span id="banned-count">0</span>/25 phrases · enforced in the prompt and checked by the editor</span>
+        </label>
 
         <label class="field extra-field">
           <span class="label">House style (optional)</span>
@@ -125,6 +134,28 @@
     <section class="toc" id="toc" hidden>
       <h2>Contents</h2>
       <ol id="toc-list"></ol>
+    </section>
+
+    <section class="report" id="report" hidden>
+      <h2>Style report</h2>
+      <div class="report-head">
+        <div class="score">
+          <span class="score-num" id="r-flags">0</span>
+          <span class="score-label">patterns left</span>
+        </div>
+        <div class="score">
+          <span class="score-num" id="r-fixed">0</span>
+          <span class="score-label">fixed by the editor</span>
+        </div>
+      </div>
+      <dl class="stats report-stats">
+        <div><dt>Reading ease</dt><dd id="r-ease">—</dd></div>
+        <div><dt>Grade level</dt><dd id="r-grade">—</dd></div>
+        <div><dt>Sentence length</dt><dd id="r-sentence">—</dd></div>
+        <div><dt>Adverbs / 100w</dt><dd id="r-adverbs">—</dd></div>
+      </dl>
+      <ul class="residue" id="r-residue"></ul>
+      <p class="hint" id="r-empty" hidden>No patterns detected in the finished book.</p>
     </section>
 
     <section class="export" id="export" hidden>

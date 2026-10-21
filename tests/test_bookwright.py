@@ -656,8 +656,8 @@ def test_request_validates_stylist_fields():
 
     from server import BookRequest
 
-    req = BookRequest(topic="a decent topic", stylist=True, stylist_strength="full")
-    assert req.stylist is True and req.stylist_strength == "full"
+    req = BookRequest(topic="a decent topic", stylist=True, stylist_strength="aggressive")
+    assert req.stylist is True and req.stylist_strength == "aggressive"
     with pytest.raises(ValidationError):
         BookRequest(topic="a decent topic", stylist_strength="extreme")
 
@@ -665,4 +665,176 @@ def test_request_validates_stylist_fields():
 def test_presets_expose_stylist_options():
     payload = config.presets_payload()
     assert payload["stylist"]["default"] is True
-    assert set(payload["stylist"]["strengths"]) == {"light", "full"}
+    assert set(payload["stylist"]["strengths"]) == {"gentle", "standard", "aggressive"}
+
+
+# --------------------------------------------------------------------------- #
+# Editorial options: expanded catalogue, profiles, banned phrases, intensity
+# --------------------------------------------------------------------------- #
+def test_catalogue_grew_and_every_rule_has_a_detector():
+    from bookwright.style import ALL_RULES
+
+    assert len(config.ANTI_PATTERNS) >= 24
+    assert set(config.ANTI_PATTERNS) == set(ALL_RULES)
+    assert config.DEFAULT_DIRECTIVES  # defaults still exist
+
+
+@pytest.mark.parametrize(
+    ("rule", "text"),
+    [
+        ("intensifiers", "It was really very quite good."),
+        ("corporate_verbs", "We leverage the tool to facilitate optimisation."),
+        ("superlatives", "It is one of the most important ideas."),
+        ("expletives", "There is a reason for this."),
+        ("the_fact_that", "Due to the fact that it rained, we waited."),
+        ("wordy_connectives", "In order to begin, we wait."),
+        ("rhetorical_questions", "Why does the system keep failing?"),
+        ("flourish_metaphors", "Learning is a journey through a labyrinth."),
+        ("anaphora", "The engine failed. The engine restarted. The engine failed again."),
+        ("adverb_density", " ".join(
+            ["She moved quickly and spoke quietly and worked carefully and deliberately while the "
+             "others watched and waited and eventually went home to sleep slowly before the "
+             "morning came and the room emptied entirely."] * 3)),
+    ],
+)
+def test_new_detectors_fire(rule, text):
+    assert rule in {f.rule for f in scan(text)}, f"{rule} did not fire"
+
+
+def test_banned_phrases_are_matched_case_insensitively():
+    text = "Our SYNERGY unlocked a paradigm shift."
+    findings = scan(text, ["banned_phrases"], ["synergy", "paradigm shift", "nonexistent"])
+    assert findings and findings[0].count == 2
+    assert scan("clean text", ["banned_phrases"], ["synergy"]) == []
+
+
+def test_banned_phrases_reach_the_writer_prompt():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard",
+                    directives=["banned_phrases"], banned_phrases=["synergy", "  thought  leader "])
+    style = spec.style
+    assert "synergy" in style and "thought leader" in style
+    assert spec.clean_banned() == ["synergy", "thought leader"]
+
+
+def test_banned_phrase_cleaning_caps_and_dedupes():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard",
+                    banned_phrases=["A", "a", "  ", "B" * 200] + [f"p{i}" for i in range(40)])
+    cleaned = spec.clean_banned()
+    assert len(cleaned) <= config.MAX_BANNED_PHRASES
+    assert cleaned[0] == "A" and cleaned[1].startswith("B")
+    assert all(len(p) <= config.BANNED_PHRASE_MAX_CHARS for p in cleaned)
+
+
+def test_every_profile_is_coherent():
+    for key, profile in config.EDITORIAL_PROFILES.items():
+        assert profile["directives"], key
+        assert set(profile["directives"]) <= set(config.ANTI_PATTERNS), key
+        assert profile["strength"] in config.STYLIST_STRENGTHS, key
+        assert profile["label"] and profile["description"], key
+    assert config.DEFAULT_PROFILE in config.EDITORIAL_PROFILES
+
+
+def test_intensity_controls_threshold_and_chunk_budget():
+    assert config.STYLIST_STRENGTHS["gentle"] > config.STYLIST_STRENGTHS["aggressive"]
+    assert config.STYLIST_CHUNK_BUDGET["gentle"] < config.STYLIST_CHUNK_BUDGET["standard"]
+    assert config.DEFAULT_STYLIST_STRENGTH in config.STYLIST_STRENGTHS
+
+
+def test_gentle_intensity_skips_lightly_flagged_chapters():
+    spec = BookSpec(topic="a topic about maintenance debt", audience="Reader", tone="clear",
+                    length_id="chapbook", stylist=True, stylist_strength="gentle")
+    job = Job(id="gentle", spec=spec, provider_name="demo")
+    asyncio.run(run_book(job, spec, MockProvider()))
+    # Fixture chapters carry ~7 flags each, above the gentle threshold of 5.
+    assert job.status == "done"
+    assert all(state["style_after"] <= state["style_before"] for state in job.chapters.values())
+
+
+def test_style_report_shape_and_effect():
+    spec = BookSpec(topic="the quiet economics of second-hand markets", audience="Reader",
+                    tone="clear", length_id="chapbook", stylist=True, stylist_strength="aggressive")
+    job = Job(id="report", spec=spec, provider_name="demo")
+    asyncio.run(run_book(job, spec, MockProvider()))
+    report = job.style_report()
+    assert report["available"] is True
+    assert report["flags_before"] > report["flags_after"]
+    assert report["rules_active"] > 0
+    assert report["chapters_edited"] >= 1
+    read = report["readability"]
+    assert read["words"] > 500
+    assert 0 <= read["flesch_ease"] <= 120
+    assert read["avg_sentence_words"] > 0
+
+
+def test_style_report_absent_without_a_plan():
+    spec = BookSpec(topic="t", audience="a", tone="clear", length_id="standard")
+    assert Job(id="x", spec=spec, provider_name="demo").style_report() == {"available": False}
+
+
+def test_revert_restores_the_draft_and_updates_the_report():
+    spec = BookSpec(topic="the quiet economics of second-hand markets", audience="Reader",
+                    tone="clear", length_id="chapbook", stylist=True, stylist_strength="aggressive")
+    job = Job(id="revert", spec=spec, provider_name="demo")
+    asyncio.run(run_book(job, spec, MockProvider()))
+    edited = next(i for i, s in job.chapters.items() if s.get("original"))
+    original = job.chapters[edited]["original"]
+    before_report = job.style_report()["total"]
+
+    assert job.revert_chapter(edited) is True
+    assert job.chapters[edited]["text"] == original
+    assert job.chapters[edited]["original"] is None
+    assert job.chapters[edited]["reverted"] is True
+    assert any(e["type"] == "chapter_reverted" for e in job.events)
+    assert job.style_report()["total"] >= before_report  # flags come back
+
+    assert job.revert_chapter(edited) is False  # nothing left to undo
+
+
+def test_request_validates_profiles_banned_phrases_and_intensity():
+    from pydantic import ValidationError
+
+    from server import BookRequest
+
+    req = BookRequest(
+        topic="a decent topic", profile="anti_ai", stylist_strength="aggressive",
+        banned_phrases=["Synergy", "synergy", "  honest  broker "],
+    )
+    assert req.profile == "anti_ai"
+    assert req.banned_phrases == ["Synergy", "honest broker"]
+    for bad in ({"profile": "nope"}, {"stylist_strength": "light"}):
+        with pytest.raises(ValidationError):
+            BookRequest(topic="a decent topic", **bad)
+
+
+def test_presets_expose_profiles_and_banned_limits():
+    payload = config.presets_payload()
+    assert len(payload["profiles"]) == len(config.EDITORIAL_PROFILES)
+    assert payload["profiles"][0]["directives"]
+    assert payload["banned_phrases"]["max"] == config.MAX_BANNED_PHRASES
+
+
+def test_profile_expands_server_side_unless_overridden():
+    from server import BookRequest, expand_profile
+
+    # profile alone pulls in its directives, intensity and house style
+    directives, strength, extra = expand_profile(
+        BookRequest(topic="a decent topic", profile="anti_ai")
+    )
+    profile = config.EDITORIAL_PROFILES["anti_ai"]
+    assert directives == profile["directives"]
+    assert strength == profile["strength"]
+    assert extra == profile["extra"]
+
+    # an explicit field wins over the profile
+    directives, strength, _ = expand_profile(
+        BookRequest(topic="a decent topic", profile="literary",
+                    directives=["cliches"], stylist_strength="aggressive")
+    )
+    assert directives == ["cliches"]
+    assert strength == "aggressive"
+
+    # no profile leaves defaults untouched
+    plain, strength, extra = expand_profile(BookRequest(topic="a decent topic"))
+    assert plain == config.DEFAULT_DIRECTIVES
+    assert strength == config.DEFAULT_STYLIST_STRENGTH
+    assert extra == ""
