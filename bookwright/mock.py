@@ -15,7 +15,7 @@ import time
 from collections.abc import AsyncIterator
 
 from . import config
-from .llm import Usage
+from .llm import LLMError, Usage
 from .schema import Chapter, Plan
 
 CHAPTER_TITLES = [
@@ -285,6 +285,9 @@ class MockProvider:
                 elapsed=elapsed,
             ),
         }
+
+    async def regenerate_chapter(self, **kwargs):
+        raise LLMError("command-based chapter regeneration requires live Groq mode; demo prose is fixed")
 
     async def rewrite_chunk(
         self, *, chunk: str, findings: str, rules: str, chapter: Chapter

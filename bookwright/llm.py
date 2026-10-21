@@ -83,6 +83,13 @@ class Provider(Protocol):
     ) -> tuple[str, Usage]:
         ...
 
+    async def regenerate_chapter(
+        self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str,
+        current_text: str, instruction: str, style: str = "", pov: str = "",
+        voice_sample: str = "",
+    ) -> tuple[str, Usage]:
+        ...
+
     async def summarize(self, *, chapter: Chapter, text: str) -> tuple[dict, Usage]:
         ...
 
@@ -351,6 +358,39 @@ class GroqProvider:
             if finish != "length":
                 break
         yield {"type": "usage", "usage": usage}
+
+    async def regenerate_chapter(
+        self,
+        *,
+        plan: Plan,
+        chapter: Chapter,
+        part_title: str,
+        bible: str,
+        current_text: str,
+        instruction: str,
+        style: str = "",
+        pov: str = "",
+        voice_sample: str = "",
+    ) -> tuple[str, Usage]:
+        from . import prompts
+
+        messages = prompts.chapter_regeneration_messages(
+            plan=plan,
+            chapter=chapter,
+            part_title=part_title,
+            bible=bible,
+            current_text=current_text,
+            instruction=instruction,
+            style=style,
+            pov=pov,
+            voice_sample=voice_sample,
+        )
+        return await self._complete_text(
+            messages,
+            model=self.writer_model,
+            max_tokens=config.writer_tokens_for(chapter.words),
+            temperature=0.45,
+        )
 
     async def rewrite_chunk(
         self, *, chunk: str, findings: str, rules: str, chapter: Chapter

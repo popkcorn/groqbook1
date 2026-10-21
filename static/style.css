@@ -566,3 +566,26 @@ textarea:focus, select:focus, input:focus {
 .export-checks label { display: flex; align-items: flex-start; gap: .4rem; }
 .export-checks input { margin: .2rem 0 0; accent-color: var(--amber); }
 .export-options > .hint { margin-top: .6rem; }
+
+/* ------------------------------------------------------- chapter regeneration */
+.chapter-tools {
+  margin-top: .8rem; padding: .65rem .75rem;
+  border: 1px solid var(--rule); border-radius: 3px; background: #fffdf8;
+}
+.chapter-tools summary {
+  cursor: pointer; color: var(--ink-soft); font-size: .72rem; font-weight: 600;
+}
+.regen-command {
+  display: block; width: 100%; margin-top: .6rem; padding: .5rem .6rem;
+  border: 1px solid var(--rule-strong); border-radius: 3px; resize: vertical;
+  color: var(--ink); background: white; font: 400 .78rem/1.5 var(--sans);
+}
+.chapter-tool-actions { display: flex; gap: .45rem; margin-top: .5rem; flex-wrap: wrap; }
+.chapter-tool-actions button {
+  padding: .35rem .6rem; border: 1px solid var(--rule-strong); border-radius: 2px;
+  color: var(--ink-soft); background: var(--paper); cursor: pointer; font: 600 .7rem var(--sans);
+}
+.chapter-tool-actions button:hover { border-color: var(--amber); }
+.chapter-tool-actions button:disabled { opacity: .55; cursor: wait; }
+.chapter-tool-actions .undo-regen-btn[hidden] { display: none; }
+.regen-note { margin: .45rem 0 0; color: var(--muted); font-size: .66rem; line-height: 1.4; }

@@ -189,6 +189,8 @@ class Job:
         A book parked at outline review is idle: it is not calling the API, so
         it must not count against the concurrency cap.
         """
+        if any(state.get("regenerating") for state in self.chapters.values()):
+            return True
         return not self.terminal and self.status != "awaiting_outline"
 
     def stats(self) -> dict:
@@ -225,6 +227,8 @@ class Job:
                     if state.get("original")
                     else None,
                     "reverted": bool(state.get("reverted")),
+                    "regeneration_count": len(state.get("regeneration_history", [])),
+                    "regenerating": bool(state.get("regenerating")),
                 }
                 for index, state in sorted(self.chapters.items())
             ],
@@ -249,6 +253,78 @@ class Job:
             "text": state["text"],
             "words": len(state["text"].split()),
             "stats": self.stats(),
+        })
+        return True
+
+    def apply_regenerated_chapter(
+        self, index: int, text: str, *, instruction: str, summary: str = ""
+    ) -> bool:
+        """Replace one finished chapter and retain a bounded undo stack."""
+        state = self.chapters.get(index)
+        text = (text or "").strip()
+        if not state or state.get("status") != "done" or not text:
+            return False
+        history = state.setdefault("regeneration_history", [])
+        history.append({
+            "text": state["text"],
+            "summary": state.get("summary", ""),
+            "original": state.get("original"),
+            "style_before": state.get("style_before"),
+            "style_after": state.get("style_after"),
+            "reverted": state.get("reverted"),
+            "instruction": instruction,
+        })
+        del history[:-5]
+        rules = self.spec.clean_directives()
+        banned = self.spec.clean_banned()
+        before = stylemod.total(stylemod.scan(state["text"], rules, banned))
+        after = stylemod.total(stylemod.scan(text, rules, banned))
+        state.update({
+            "text": text,
+            "summary": summary.strip(),
+            "original": None,
+            "style_before": before,
+            "style_after": after,
+            "reverted": False,
+            "regenerating": False,
+        })
+        self.emit({
+            "type": "chapter_regenerated",
+            "index": index,
+            "text": text,
+            "summary": state["summary"],
+            "words": len(text.split()),
+            "regeneration_count": len(history),
+            "stats": self.stats(),
+            "style_report": self.style_report(),
+        })
+        return True
+
+    def undo_regeneration(self, index: int) -> bool:
+        """Restore the chapter version immediately before its last regeneration."""
+        state = self.chapters.get(index)
+        history = state.get("regeneration_history", []) if state else []
+        if not state or state.get("status") != "done" or not history:
+            return False
+        previous = history.pop()
+        state.update({
+            "text": previous["text"],
+            "summary": previous.get("summary", ""),
+            "original": previous.get("original"),
+            "style_before": previous.get("style_before"),
+            "style_after": previous.get("style_after"),
+            "reverted": previous.get("reverted"),
+            "regenerating": False,
+        })
+        self.emit({
+            "type": "chapter_regeneration_undone",
+            "index": index,
+            "text": state["text"],
+            "summary": state["summary"],
+            "words": len(state["text"].split()),
+            "regeneration_count": len(history),
+            "stats": self.stats(),
+            "style_report": self.style_report(),
         })
         return True
 
@@ -285,6 +361,8 @@ class Job:
                 "original": None,
                 "style_before": None,
                 "style_after": None,
+                "regeneration_history": [],
+                "regenerating": False,
             }
 
     def apply_outline(self, plan: Plan) -> None:

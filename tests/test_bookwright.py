@@ -22,6 +22,7 @@ from bookwright.exporters import (
 from bookwright.jobs import BookSpec, Job, chunk_text, estimate, run_book
 from bookwright.llm import Usage
 from bookwright.mock import MockProvider
+from bookwright.prompts import chapter_regeneration_messages
 from bookwright.schema import Plan, PlanError, parse_plan
 from bookwright.style import length_ratio, paragraph_diff, scan, summary, total
 
@@ -206,6 +207,135 @@ def test_estimate_positive():
     assert est["chapters"] == 6
     assert est["prompt_tokens"] > 0 and est["completion_tokens"] > 0
 
+
+
+def test_chapter_regeneration_prompt_is_targeted():
+    job = _run()
+    chapter = job.plan.chapter(2)
+    messages = chapter_regeneration_messages(
+        plan=job.plan,
+        chapter=chapter,
+        part_title=job.plan.parts[0].title,
+        bible="The book's central argument.",
+        current_text="Existing chapter prose.",
+        instruction="Open with a concrete scene and shorten the ending.",
+        style="Use plain, direct language.",
+        pov="Second person.",
+        voice_sample="A distinct author sample.",
+    )
+    assert len(messages) == 2
+    assert "one chapter" in messages[0]["content"]
+    assert "Second person" in messages[0]["content"]
+    assert "A distinct author sample" in messages[0]["content"]
+    assert "Chapter 2: " + chapter.title in messages[1]["content"]
+    assert "Open with a concrete scene" in messages[1]["content"]
+    assert "Existing chapter prose." in messages[1]["content"]
+    assert "Requested length" in messages[1]["content"]
+
+
+def test_job_chapter_regeneration_isolated_and_undo_restores_metadata():
+    job = _run()
+    selected = job.chapters[2]
+    untouched = {i: state["text"] for i, state in job.chapters.items() if i != 2}
+    before = {
+        key: selected.get(key)
+        for key in ("text", "summary", "original", "style_before", "style_after", "reverted")
+    }
+    replacement = "A substantially revised chapter with new prose."
+    assert job.apply_regenerated_chapter(
+        2, replacement, instruction="Make the opening more concrete.", summary="A revised summary."
+    )
+    assert selected["text"] == replacement
+    assert selected["summary"] == "A revised summary."
+    assert all(job.chapters[i]["text"] == text for i, text in untouched.items())
+    assert job.snapshot()["chapters"][1]["regeneration_count"] == 1
+    assert job.undo_regeneration(2)
+    assert {key: selected.get(key) for key in before} == before
+    assert all(job.chapters[i]["text"] == text for i, text in untouched.items())
+    assert job.snapshot()["chapters"][1]["regeneration_count"] == 0
+
+
+def test_job_regeneration_history_is_bounded():
+    job = _run()
+    state = job.chapters[1]
+    for n in range(7):
+        assert job.apply_regenerated_chapter(
+            1, f"Replacement version {n}.", instruction=f"Version {n}"
+        )
+    assert len(state["regeneration_history"]) == 5
+    for _ in range(5):
+        assert job.undo_regeneration(1)
+    assert not job.undo_regeneration(1)
+
+
+def test_regeneration_api_uses_request_key_and_returns_undo_metadata(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import server
+    from bookwright.jobs import JobStore
+
+    job = _run()
+    prior = job.chapters[1]["text"]
+    other = job.chapters[2]["text"]
+    store = JobStore()
+    store._jobs[job.id] = job
+    store._order.append(job.id)
+    monkeypatch.setattr(server, "store", store)
+    key = {"value": None}
+    fail_model = {"value": False}
+    monkeypatch.setattr(server, "_client_key", lambda request, body_key=None: key["value"])
+
+    class FakeProvider:
+        def __init__(self, api_key):
+            assert api_key == "gsk_test"
+
+        async def regenerate_chapter(self, **kwargs):
+            assert kwargs["instruction"] == "Make this chapter more concise."
+            if fail_model["value"]:
+                raise RuntimeError("simulated provider failure")
+            return "Revised chapter text.", Usage(prompt_tokens=3, completion_tokens=4)
+
+        async def summarize(self, **kwargs):
+            return {"summary": "A new summary."}, Usage()
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(server, "GroqProvider", FakeProvider)
+    client = TestClient(server.app)
+    url = f"/api/books/{job.id}/chapters/1/regenerate"
+    payload = {"instruction": "Make this chapter more concise."}
+
+    missing_key = client.post(url, json=payload)
+    assert missing_key.status_code == 409
+    assert "Groq API key" in missing_key.json()["error"]
+    assert job.chapters[1]["text"] == prior
+    assert job.snapshot()["chapters"][0]["regeneration_count"] == 0
+
+    key["value"] = "gsk_test"
+    fail_model["value"] = True
+    failed_model = client.post(url, json=payload)
+    assert failed_model.status_code == 502
+    assert "existing chapter was kept" in failed_model.json()["error"]
+    assert job.chapters[1]["text"] == prior
+    assert job.snapshot()["chapters"][0]["regeneration_count"] == 0
+
+    fail_model["value"] = False
+    response = client.post(url, json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["chapter"]["text"] == "Revised chapter text."
+    assert body["chapter"]["summary"] == "A new summary."
+    assert body["chapter"]["regeneration_count"] == 1
+    assert "regeneration_history" not in str(job.snapshot())
+    assert job.chapters[2]["text"] == other
+
+    undone = client.post(f"/api/books/{job.id}/chapters/1/undo-regeneration")
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["chapter"]["text"] == prior
+    assert undone.json()["chapter"]["summary"] == job.chapters[1]["summary"]
+    assert undone.json()["chapter"]["regeneration_count"] == 0
+    assert job.chapters[2]["text"] == other
 
 # --------------------------------------------------------------------------- #
 # Export

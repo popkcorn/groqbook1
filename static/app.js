@@ -21,6 +21,7 @@
     preset: null,
     job: null,
     plan: null,
+    status: null,
     chapters: new Map(), // index -> { text, status, title, node, bodyNode, words }
     rendering: new Set(),
     stream: null,
@@ -525,6 +526,7 @@
 
     stream.addEventListener("status", (e) => {
       const data = JSON.parse(e.data);
+      state.status = data.stage || state.status;
       if (data.message) setStatus(data.message);
     });
 
@@ -622,6 +624,8 @@
 
     stream.addEventListener("done", (e) => {
       const data = JSON.parse(e.data);
+      state.status = data.status;
+      state.chapters.forEach(paintChapterTools);
       const label =
         data.status === "partial"
           ? `Finished with ${data.failed.length} failed chapter${data.failed.length === 1 ? "" : "s"}`
@@ -636,6 +640,8 @@
     });
 
     stream.addEventListener("error", (e) => {
+      state.status = "error";
+      state.chapters.forEach(paintChapterTools);
       if (e.data) {
         const data = JSON.parse(e.data);
         setStatus("Generation failed");
@@ -646,6 +652,8 @@
     });
 
     stream.addEventListener("cancelled", () => {
+      state.status = "cancelled";
+      state.chapters.forEach(paintChapterTools);
       setStatus("Stopped — what was written is kept");
       markRunDone("error");
       closeOutline();
@@ -688,8 +696,8 @@
   }
 
   function applySnapshot(snap) {
-    if (snap.plan) renderPlan(snap.plan, snap.chapters);
     state.status = snap.status;
+    if (snap.plan) renderPlan(snap.plan, snap.chapters);
     if (snap.status === "awaiting_outline" && snap.plan) {
       openOutline(snap.plan);
       setStatus("Outline ready — edit it, then approve to start writing");
@@ -702,16 +710,16 @@
     for (const chapter of snap.chapters || []) {
       ensureChapter(chapter.index, chapter.title);
       const local = state.chapters.get(chapter.index);
-      if (chapter.text.length >= local.text.length) {
-        local.text = chapter.text;
-        local.status = chapter.status;
-        local.summary = chapter.summary || "";
-        local.original = chapter.original || null;
-        local.diff = chapter.diff || null;
-        local.fixes = Math.max(0, (chapter.style_before || 0) - (chapter.style_after || 0));
-        local.reverted = Boolean(chapter.reverted);
-        renderChapter(chapter.index, true);
-      }
+      local.text = chapter.text || "";
+      local.status = chapter.status;
+      local.summary = chapter.summary || "";
+      local.original = chapter.original || null;
+      local.diff = chapter.diff || null;
+      local.fixes = Math.max(0, (chapter.style_before || 0) - (chapter.style_after || 0));
+      local.reverted = Boolean(chapter.reverted);
+      local.regenerationCount = chapter.regeneration_count || 0;
+      local.regenerating = Boolean(chapter.regenerating);
+      renderChapter(chapter.index, true);
       paintToc();
     }
     applyStats(snap.stats);
@@ -735,8 +743,9 @@
     }
     const chapter = {
       index, title: title || `Chapter ${index}`, text: "", status: "pending", summary: "",
-      words: 0, node: null, bodyNode: null,
+      words: 0, node: null, bodyNode: null, toolsNode: null,
       original: null, diff: null, fixes: 0, diffOpen: false, reverted: false,
+      regenCommand: "", regenerationCount: 0, regenerating: false,
     };
     state.chapters.set(index, chapter);
     return chapter;
@@ -802,12 +811,35 @@
         body.innerHTML = '<div class="skeleton w80"></div><div class="skeleton"></div><div class="skeleton w60"></div>';
         const foot = el("div", "ch-foot");
         foot.append(el("span", "flag", ""), el("span", "sep"));
-        article.append(head, body, foot);
+        const tools = el("details", "chapter-tools");
+        const toolsSummary = el("summary", "", "Regenerate this chapter with a command");
+        const command = document.createElement("textarea");
+        command.className = "regen-command";
+        command.rows = 2;
+        command.maxLength = 1200;
+        command.placeholder = "e.g. Tighten the opening, add a concrete example from the supplied notes, and make the ending less conclusive.";
+        command.value = chapter.regenCommand || "";
+        command.addEventListener("input", () => { chapter.regenCommand = command.value; });
+        const toolActions = el("div", "chapter-tool-actions");
+        const regenerate = el("button", "regen-btn", "Regenerate chapter");
+        regenerate.type = "button";
+        regenerate.addEventListener("click", () => regenerateChapter(chapter.index));
+        const undoRegeneration = el("button", "undo-regen-btn", "Undo regeneration");
+        undoRegeneration.type = "button";
+        undoRegeneration.addEventListener("click", () => undoChapterRegeneration(chapter.index));
+        const note = el("p", "regen-note", "Only this chapter changes; later chapters are not automatically rewritten. A Groq key is required for custom commands.");
+        toolActions.append(regenerate, undoRegeneration);
+        tools.append(toolsSummary, command, toolActions, note);
+        article.append(head, body, foot, tools);
         book.append(article);
 
         chapter.node = article;
         chapter.bodyNode = body;
         chapter.footNode = foot;
+        chapter.toolsNode = tools;
+        chapter.regenCommandNode = command;
+        chapter.regenerateButton = regenerate;
+        chapter.undoRegenerationButton = undoRegeneration;
         chapter.status = chapter.status || "pending";
         if (chapter.text) renderChapter(spec.index, true);
       }
@@ -819,7 +851,11 @@
     if (chapters && chapters.length) {
       for (const item of chapters) {
         const chapter = ensureChapter(item.index, item.title);
-        if (item.text && item.text.length > chapter.text.length) chapter.text = item.text;
+        chapter.text = item.text || "";
+        chapter.status = item.status || chapter.status;
+        chapter.summary = item.summary || "";
+        chapter.regenerationCount = item.regeneration_count || 0;
+        chapter.regenerating = Boolean(item.regenerating);
       }
     }
   }
@@ -841,6 +877,21 @@
     chapter.bodyNode.innerHTML = html + caret + (chapter.diffOpen ? diffHtml(chapter) : "");
     chapter.node?.classList.toggle("pending", false);
     paintChapterFoot(chapter);
+    paintChapterTools(chapter);
+  }
+
+  function paintChapterTools(chapter) {
+    const tools = chapter.toolsNode;
+    if (!tools) return;
+    const finished = ["done", "partial"].includes(state.status);
+    tools.hidden = chapter.status !== "done" || !finished;
+    if (chapter.regenerateButton) {
+      chapter.regenerateButton.disabled = Boolean(chapter.regenerating);
+      chapter.regenerateButton.textContent = chapter.regenerating ? "Regenerating…" : "Regenerate chapter";
+    }
+    if (chapter.undoRegenerationButton) {
+      chapter.undoRegenerationButton.hidden = !chapter.regenerationCount || Boolean(chapter.regenerating);
+    }
   }
 
   function paintChapterFoot(chapter) {
@@ -909,6 +960,66 @@
       if (body.report) renderStyleReport(body.report);
     } catch (err) {
       toast(err.message);
+    }
+  }
+
+  function applyRegenerationResult(chapter, result) {
+    const update = result.chapter || result;
+    chapter.text = update.text || "";
+    chapter.summary = update.summary || "";
+    chapter.words = update.words || chapter.text.split(/\s+/).filter(Boolean).length;
+    chapter.original = update.original || null;
+    chapter.diff = update.diff || null;
+    chapter.fixes = Math.max(0, (update.style_before || 0) - (update.style_after || 0));
+    chapter.reverted = Boolean(update.reverted);
+    chapter.regenerationCount = update.regeneration_count || 0;
+    chapter.regenerating = false;
+    chapter.status = "done";
+    renderChapter(chapter.index, true);
+    if (result.stats) applyStats(result.stats);
+    if (result.style_report) renderStyleReport(result.style_report);
+  }
+
+  async function regenerateChapter(index) {
+    const chapter = state.chapters.get(index);
+    const instruction = (chapter?.regenCommand || "").trim();
+    if (!chapter || instruction.length < 5) {
+      toast("Enter a specific revision command (at least five characters).");
+      return;
+    }
+    chapter.regenerating = true;
+    paintChapterTools(chapter);
+    setStatus(`Regenerating chapter ${index}…`);
+    try {
+      const result = await api(`/api/books/${state.job}/chapters/${index}/regenerate`, {
+        method: "POST",
+        body: JSON.stringify({ instruction }),
+      });
+      applyRegenerationResult(chapter, result);
+      setStatus(`Chapter ${index} regenerated`);
+    } catch (err) {
+      chapter.regenerating = false;
+      paintChapterTools(chapter);
+      toast(err.message, 9000);
+      setStatus("Chapter regeneration failed; the existing text was kept");
+    }
+  }
+
+  async function undoChapterRegeneration(index) {
+    const chapter = state.chapters.get(index);
+    if (!chapter || !chapter.regenerationCount) return;
+    chapter.regenerating = true;
+    paintChapterTools(chapter);
+    try {
+      const result = await api(`/api/books/${state.job}/chapters/${index}/undo-regeneration`, {
+        method: "POST",
+      });
+      applyRegenerationResult(chapter, result);
+      setStatus(`Restored the previous version of chapter ${index}`);
+    } catch (err) {
+      chapter.regenerating = false;
+      paintChapterTools(chapter);
+      toast(err.message, 9000);
     }
   }
 

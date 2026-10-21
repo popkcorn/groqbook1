@@ -321,6 +321,20 @@ In the app: **Editorial de-AI pass** toggles it (on by default), with `Gentle` /
 button that opens a paragraph-level before/after diff (unchanged paragraphs hidden), and **Undo
 edits**, which puts that one chapter's pre-editorial draft back without touching the rest.
 
+### Regenerate one finished chapter
+
+After the book reaches **Done** or **Partial**, expand **Regenerate this chapter** on a completed
+chapter, describe the change in plain language, and submit it. The rewrite is scoped to that chapter:
+other chapter text is left untouched, and later chapters are not automatically rewritten. The command
+is sent to the Writer with the chapter, book bible, style, point of view, and optional voice sample.
+The browser shows **Undo last regeneration**; up to five prior versions (including summaries and
+editorial metadata) are retained for that chapter only.
+
+Custom regeneration requires a Groq key, supplied either by the existing **API key** control (`X-Groq-Key`)
+or `GROQ_API_KEY` on the server. Demo fixture prose is intentionally fixed and cannot be regenerated.
+The key is request-scoped and is never stored in the book job. A failed provider call leaves the current
+chapter unchanged. The instruction is limited to 1,200 characters.
+
 #### The style report
 
 When a book finishes, the app reports what the editorial stage actually achieved:
@@ -376,9 +390,11 @@ main.py          the original Groqbook app, unchanged, for reference
 | `GET` | `/api/presets` | Lengths, tones, audiences, limits |
 | `POST` | `/api/books` | Start a book; returns `id` + token estimate |
 | `GET` | `/api/books/{id}` | Full snapshot (plan, chapters, stats) |
-| `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `stylist_start`, `stylist_done`, `stylist_rejected`, `chapter_reverted`, `chapter_drafted`, `chapter_done`, `outline_review`, `done`, `error` |
+| `GET` | `/api/books/{id}/events` | **SSE** stream: `snapshot`, `status`, `plan`, `chapter_start`, `delta`, `chapter_written`, `stylist_start`, `stylist_done`, `stylist_rejected`, `chapter_reverted`, `chapter_regenerated`, `chapter_regeneration_undone`, `chapter_drafted`, `chapter_done`, `outline_review`, `done`, `error` |
 | `GET` | `/api/books/{id}/style-report` | Residue per rule, flags fixed, readability |
 | `POST` | `/api/books/{id}/chapters/{n}/revert` | Undo the editorial edits on one chapter |
+| `POST` | `/api/books/{id}/chapters/{n}/regenerate` | Regenerate one finished chapter; JSON `{"instruction":"..."}`, Groq key required |
+| `POST` | `/api/books/{id}/chapters/{n}/undo-regeneration` | Restore the chapter version before its latest regeneration |
 | `POST` | `/api/books/{id}/outline` | Validate and approve an edited plan; resumes the parked writer |
 | `POST` | `/api/books/{id}/cancel` | Stop; keeps what was written |
 | `GET` | `/api/books/{id}/export/{md\|html\|epub\|pdf}` | Download |

@@ -333,6 +333,7 @@ MAX_EXTRA_INSTRUCTIONS = 400
 # app has: specifics the writer is told to use rather than invent.
 MAX_NOTES_CHARS = 4000
 MAX_VOICE_SAMPLE_CHARS = 1200
+MAX_REGENERATION_INSTRUCTION = 1200
 
 # Grammatical person. "auto" leaves it to the plan's own voice direction.
 POVS = {
