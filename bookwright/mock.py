@@ -256,7 +256,8 @@ class MockProvider:
 
     async def write_chapter(
         self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = "",
-        pov: str = "", voice_sample: str = "",
+        pov: str = "", voice_sample: str = "", unit_label: str = "chapter",
+        part_label: str = "part",
     ) -> AsyncIterator[dict]:
         text = compose_chapter(plan.title, chapter, chapter.words)
         # Demo prose is fixture text, but honour the visible directives so the

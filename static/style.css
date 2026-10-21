@@ -557,8 +557,11 @@ textarea:focus, select:focus, input:focus {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem;
   margin-top: .65rem;
 }
-.export-controls .mini { min-width: 0; }
-.export-controls select { width: 100%; max-width: 100%; font-size: .72rem; }
+.export-controls .mini { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
+.export-controls .mini > span { color: var(--ink-soft); font-size: .68rem; }
+.export-controls input, .export-controls select {
+  width: 100%; max-width: 100%; min-width: 0; font-size: .72rem;
+}
 .export-checks {
   display: grid; gap: .35rem; margin-top: .7rem;
   color: var(--ink-soft); font-size: .72rem;

@@ -54,6 +54,8 @@ class LengthPreset:
     words_per_chapter: int
     parts: int
     blurb: str
+    unit_label: str = "chapter"
+    part_label: str = "part"
 
     @property
     def total_words(self) -> int:

@@ -207,8 +207,18 @@ chapter, or remove one. Approving starts the writer. Every edit is re-validated
 by the server, including the two-chapter minimum and 20-chapter ceiling. If you
 turn the option off, the book writes as soon as the plan passes validation.
 
-This is the cheapest point to correct a weak structure. A chapter whose purpose
+This is the cheapest point to correct a weak structure. A division whose purpose
 is wrong is much harder to repair after several thousand words exist.
+
+### Name and organize the divisions
+
+The **Book structure** controls let you call each major division a chapter,
+section, essay, or entry, and its parent group a part, book, or volume. Choose
+the group count (or keep it automatic) and internal-heading density, from
+continuous prose with no subheadings to a more detailed hierarchy. A 2,000-word unit is a short chapter or essay—not a
+paragraph; the label describes its role, while the word target controls length.
+The underlying plan/API keeps the existing `parts` and `chapters` fields for
+compatibility.
 
 ### Style controls — getting away from "AI voice"
 
@@ -423,23 +433,28 @@ curl -OJ localhost:8000/api/books/<id>/export/pdf
 
 ### Export layout controls
 
-After a book has text, the Export panel lets you choose page size (A5, A4, Letter),
-margins (narrow, normal, wide), chapter label (`Chapter 1`, `1.`, or title only), body font size (9–14 pt), line
-spacing, paragraph indents versus spacing, left versus justified alignment, chapter
-page breaks, and PDF running headers/page numbers. These settings apply at export
-time; they do not change the generated prose. Page size and pagination apply to PDF
-and print-ready HTML. EPUB readers control their own pagination; EPUB still honors
-the typography and heading choices. Markdown reflects the chapter-heading style.
+After a book has text, the Export panel lets you set the division/group labels,
+heading format (`Chapter 1`, `1.`, or title only), exported title and subtitle,
+and whether to include a title page or subtitle. PDF running-header text (left
+and right) and page numbers are controlled independently. Layout controls include
+page size (A5, A4, Letter), margins, body font size (9–14 pt), line spacing,
+paragraph indents versus spacing, alignment, and a page break per major division.
+These presentation settings do not change the generated prose. Page size and
+pagination apply to PDF and print-ready HTML. EPUB readers control pagination;
+EPUB honors typography and heading choices. Markdown uses the selected division
+heading style and includes the exported title.
 
-The same settings are available as query parameters, for example:
+The settings are also available as query parameters, for example:
 
 ```text
-/api/books/<id>/export/pdf?page_size=letter&margins=wide&chapter_heading=number&body_font_size=12&line_spacing=airy&paragraph_style=space&alignment=left&chapter_new_page=false&running_matter=false
+/api/books/<id>/export/pdf?page_size=letter&margins=wide&chapter_heading=number&unit_label=essay&part_label=book&title=Sample&subtitle=An%20overview&body_font_size=12&line_spacing=airy&paragraph_style=space&alignment=left&chapter_new_page=false&running_matter=true&page_numbers=false&header_left=Sample&header_right=AUTHOR&show_title_page=false&show_subtitle=false
 ```
 
 For grounded or reviewed books, `POST /api/books` also accepts `notes`,
-`voice_sample`, `pov` (`auto`, `first`, `we`, `you`, `third`), and
-`review_outline`. Browser review defaults on; API clients opt in with
+`voice_sample`, `pov` (`auto`, `first`, `we`, `you`, `third`), `review_outline`,
+`unit_label` (`chapter`, `section`, `essay`, `entry`), `part_label` (`part`,
+`book`, `volume`), `group_count` (1–6, optional), and `subheading_style`
+(`none`, `few`, `standard`, `detailed`). Browser review defaults on; API clients opt in with
 `"review_outline": true`. The outline endpoint accepts the architect's plan
 shape with your edits; it does not accept prose.
 

@@ -22,7 +22,7 @@ from bookwright.exporters import (
 from bookwright.jobs import BookSpec, Job, chunk_text, estimate, run_book
 from bookwright.llm import GroqProvider, Usage, _backoff
 from bookwright.mock import MockProvider
-from bookwright.prompts import chapter_regeneration_messages
+from bookwright.prompts import chapter_messages, chapter_regeneration_messages, plan_messages
 from bookwright.schema import Plan, PlanError, parse_plan
 from bookwright.style import length_ratio, paragraph_diff, scan, summary, total
 
@@ -153,7 +153,8 @@ def test_bible_is_carried_between_waves():
 
     class Recording(MockProvider):
         async def write_chapter(
-            self, *, plan, chapter, part_title, bible, style="", pov="", voice_sample=""
+            self, *, plan, chapter, part_title, bible, style="", pov="", voice_sample="",
+            unit_label="chapter", part_label="part"
         ):
             seen.append(bible)
             async for event in super().write_chapter(
@@ -176,7 +177,8 @@ def test_bible_is_carried_between_waves():
 def test_cancel_marks_job_cancelled():
     class SlowProvider(MockProvider):
         async def write_chapter(
-            self, *, plan, chapter, part_title, bible, style="", pov="", voice_sample=""
+            self, *, plan, chapter, part_title, bible, style="", pov="", voice_sample="",
+            unit_label="chapter", part_label="part"
         ):
             async for event in super().write_chapter(
                 plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style
@@ -324,6 +326,10 @@ def test_groq_model_catalog_and_per_role_selection(monkeypatch):
             "architect_model": "groq/architect-model",
             "writer_model": "groq/writer-model",
             "editor_model": "groq/writer-model",
+            "unit_label": "essay",
+            "part_label": "book",
+            "subheading_style": "none",
+            "group_count": 2,
         },
     )
     assert response.status_code == 202, response.text
@@ -333,6 +339,10 @@ def test_groq_model_catalog_and_per_role_selection(monkeypatch):
         "editor": "groq/writer-model",
     }
     assert store.get(response.json()["id"]).models == response.json()["models"]
+    spec = store.get(response.json()["id"]).spec
+    assert (spec.unit_label, spec.part_label, spec.subheading_style) == ("essay", "book", "none")
+    assert spec.length.parts == 2
+    assert response.json()["unit_label"] == "essay"
 
 
 def test_groq_provider_maps_model_metadata():
@@ -657,6 +667,119 @@ def test_export_options_change_chapter_heading_and_validate(finished):
         ExportOptions(page_size="tabloid")
     with pytest.raises(ValueError, match="margins"):
         ExportOptions(margins="huge")
+
+
+
+
+def test_structure_choices_reach_planning_and_writing_prompts():
+    spec = BookSpec(
+        topic="the hidden cost of maintenance", audience="Reader", tone="clear",
+        length_id="custom", chapters_override=4, words_override=2_000,
+        unit_label="essay", part_label="book", subheading_style="none", group_count_override=2,
+    )
+    shape = __import__("bookwright.schema", fromlist=["plan_skeleton_hint"]).plan_skeleton_hint(spec.length)
+    assert "4 essays" in shape and "2,000 words" in shape and "1 books" not in shape
+    planning = plan_messages(
+        topic=spec.topic, audience=spec.audience, tone=spec.tone, length=spec.length
+    )
+    assert "Call each major division an essay" in planning[0]["content"]
+    assert "call each grouping a book" in planning[0]["content"]
+    writing = chapter_messages(
+        plan=Plan(title="T", subtitle="S", thesis="", audience="Reader", voice="", parts=[]),
+        chapter=__import__("bookwright.schema", fromlist=["Chapter"]).Chapter(
+            index=1, title="The first repair", purpose="Show the cost", beats=[], terms=[], words=2_000
+        ),
+        part_title="A book", bible="continuity", style=spec.style,
+        unit_label="essay", part_label="book",
+    )
+    assert "write one essay at a time" in writing[0]["content"]
+    assert "continuous prose with no internal section headings" in writing[0]["content"]
+    assert "# Book: A book" in writing[1]["content"]
+    assert "# Essay 1:" in writing[1]["content"]
+
+
+def test_export_structure_title_page_subtitle_and_custom_metadata(finished):
+    plan, chapters = finished
+    options = ExportOptions(
+        unit_label="essay", part_label="book", title_override="A Custom Title",
+        subtitle_override="A New Subtitle", show_title_page=False, show_subtitle=False,
+    )
+    markdown = to_markdown(plan, chapters, options=options)
+    assert markdown.startswith("# A Custom Title")
+    assert "A New Subtitle" not in markdown
+    assert "## Book 1:" in markdown and "### Essay 1." in markdown
+
+    rendered = to_html(plan, chapters, options=options)
+    assert "<title>A Custom Title</title>" in rendered
+    assert 'class="cover"' not in rendered
+    assert "A New Subtitle" not in rendered
+    assert "Book 1</h2>" in rendered and "Essay 1" in rendered
+
+    epub = to_epub(plan, chapters, options=options)
+    with zipfile.ZipFile(io.BytesIO(epub)) as archive:
+        names = archive.namelist()
+        assert "OEBPS/title.xhtml" not in names
+        assert "<dc:title>A Custom Title</dc:title>" in archive.read("OEBPS/content.opf").decode()
+        part = archive.read("OEBPS/part1.xhtml").decode()
+        chapter = archive.read("OEBPS/ch01.xhtml").decode()
+        assert "Book 1:" in part and "Essay 1" in chapter
+
+
+def test_export_api_forwards_structure_and_title_overrides(finished, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import server
+
+    plan, texts = finished
+    spec = BookSpec(
+        topic="an export test", audience="Reader", tone="clear", length_id="standard",
+        unit_label="essay", part_label="book",
+    )
+    job = Job(id="export-options", spec=spec, provider_name="demo", plan=plan)
+    job.chapters = {
+        chapter.index: {
+            "title": chapter.title,
+            "text": texts[chapter.index]["text"],
+            "status": "done",
+            "summary": "",
+        }
+        for chapter in plan.chapters
+    }
+    store = server.JobStore()
+    store._jobs[job.id] = job
+    monkeypatch.setattr(server, "store", store)
+    response = TestClient(server.app).get(
+        f"/api/books/{job.id}/export/html",
+        params={
+            "unit_label": "essay", "part_label": "book",
+            "title": "Export title", "subtitle": "Export subtitle",
+            "show_title_page": "false", "show_subtitle": "false",
+        },
+    )
+    assert response.status_code == 200
+    content = response.text
+    assert "<title>Export title</title>" in content
+    assert 'class="cover"' not in content and "Export subtitle" not in content
+    assert "Book 1" in content and "Essay 1" in content
+
+
+def test_pdf_running_header_and_page_numbers_are_independent(finished):
+    pymupdf = pytest.importorskip("pymupdf")
+    plan, chapters = finished
+    options = ExportOptions(
+        running_matter=True, page_numbers=False, header_left="LEFT HEADER",
+        header_right="RIGHT HEADER", show_title_page=False,
+    )
+    data, _, _ = export(plan, chapters, "pdf", options=options)
+    text = "\n".join(page.get_text() for page in pymupdf.open(stream=data, filetype="pdf"))
+    assert "LEFT HEADER" in text and "RIGHT HEADER" in text
+    assert "BOOKWRIGHT" not in text
+    for page in pymupdf.open(stream=data, filetype="pdf"):
+        footer_words = [
+            word[4] for word in page.get_text("words")
+            if word[1] > page.rect.height - 40
+        ]
+        assert str(page.number + 1) not in footer_words
 
 
 def test_html_export_uses_selected_page_and_text_layout(finished):
@@ -1341,7 +1464,7 @@ def test_notes_reach_the_architect_and_every_chapter_prompt():
             )
 
         async def write_chapter(self, *, plan, chapter, part_title, bible, style="",
-                                pov="", voice_sample=""):
+                                pov="", voice_sample="", unit_label="chapter", part_label="part"):
             seen.append(bible)
             async for event in super().write_chapter(
                 plan=plan, chapter=chapter, part_title=part_title, bible=bible,
@@ -1371,12 +1494,13 @@ def test_voice_sample_reaches_the_writer_but_not_the_bible():
 
     class Recorder(MockProvider):
         async def write_chapter(self, *, plan, chapter, part_title, bible, style="",
-                                pov="", voice_sample=""):
+                                pov="", voice_sample="", unit_label="chapter", part_label="part"):
             from bookwright import prompts as promptmod
 
             messages = promptmod.chapter_messages(
                 plan=plan, chapter=chapter, part_title=part_title, bible=bible,
                 style=style, pov=pov, voice_sample=voice_sample,
+                unit_label=unit_label, part_label=part_label,
             )
             prompts_seen.append(messages[0]["content"])
             async for event in super().write_chapter(

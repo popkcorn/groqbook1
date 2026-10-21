@@ -53,16 +53,51 @@
         <div class="chips" id="lengths" role="radiogroup" aria-label="Length"></div>
         <div class="custom-length" id="custom-length" hidden>
           <label class="mini">
-            <span>Chapters</span>
+            <span id="custom-units-label">Chapters</span>
             <input id="c-chapters" type="number" min="2" max="20" step="1" value="10">
           </label>
           <label class="mini">
-            <span>Words / chapter</span>
+            <span id="custom-words-label">Words / chapter</span>
             <input id="c-words" type="number" min="250" max="2000" step="50" value="1000">
           </label>
           <p class="hint" id="custom-summary">10 chapters · ~10,000 words</p>
         </div>
       </div>
+
+      <details class="style-panel" id="structure-panel">
+        <summary><span>Book structure</span><span class="style-count">optional</span></summary>
+        <div class="field-row">
+          <label class="field"><span class="label">Major division name</span>
+            <select id="unit-label">
+              <option value="chapter">Chapter</option><option value="section">Section</option>
+              <option value="essay">Essay</option><option value="entry">Entry</option>
+            </select>
+            <span class="hint">A 2,000-word division can be a short chapter or an essay; it is not a paragraph.</span>
+          </label>
+          <label class="field"><span class="label">Group name</span>
+            <select id="part-label">
+              <option value="part">Part</option><option value="book">Book</option>
+              <option value="volume">Volume</option>
+            </select>
+          </label>
+          <label class="field"><span class="label">Number of groups</span>
+            <select id="group-count"><option value="">Automatic</option>
+              <option value="1">1 group</option><option value="2">2 groups</option>
+              <option value="3">3 groups</option><option value="4">4 groups</option>
+              <option value="5">5 groups</option><option value="6">6 groups</option>
+            </select>
+          </label>
+        </div>
+        <label class="field"><span class="label">Internal headings</span>
+          <select id="subheading-style">
+            <option value="none">Continuous prose — no internal headings</option>
+            <option value="few">Few — at most 1–2</option>
+            <option value="standard" selected>Standard — 2–4 where useful</option>
+            <option value="detailed">Detailed — 4–6 major steps</option>
+          </select>
+          <span class="hint">“No internal headings” still keeps each major division as a chapter, section, essay, or entry.</span>
+        </label>
+      </details>
 
       <details class="style-panel" id="grounding">
         <summary>
@@ -182,7 +217,9 @@
             <dt>Voice</dt>
             <dd>Sets the prose tone—such as plain, narrative, rigorous, or playful—and influences both the outline and chapters.</dd>
             <dt>Length</dt>
-            <dd>Sets chapter count and target words per chapter. Longer books request more model output and take longer; Custom lets you choose both values.</dd>
+            <dd>Sets the number of major divisions and target words in each. A 2,000-word unit is a short chapter/essay, not a paragraph; the label is your choice. Custom lets you choose the count and word target.</dd>
+            <dt>Book structure</dt>
+            <dd>Choose reader-facing names and count for groups and major divisions, plus continuous prose or a chosen density of internal section headings. JSON/API structure remains compatible.</dd>
             <dt>Facts, notes and sources</dt>
             <dd>Supplies grounding material for planning and every chapter. The model is asked to use it rather than invent specifics, but it is not a fact-checker.</dd>
             <dt>Voice sample</dt>
@@ -216,16 +253,19 @@
             <dd>Markdown is easy to edit, HTML is for browsers and printing, EPUB is for e-readers, and PDF preserves a fixed page layout.</dd>
             <dt>Page size and margins</dt>
             <dd>Set the page dimensions and printable area; they change layout and page count, not the prose.</dd>
-            <dt>Chapter heading</dt>
-            <dd>Chooses whether exports label chapters as “Chapter 1”, “1.”, or with the title only.</dd>
+            <dt>Division heading</dt>
+            <dd>Chooses whether exports label major divisions with their selected name (for example, “Essay 1”), a number, or title only.</dd>
+            <dt>Title, subtitle and title page</dt>
+            <dd>Override the exported title/subtitle or omit the title page/subtitle without changing the saved outline.</dd>
+            <dt>PDF running header</dt>
+            <dd>Set the left and right running header text independently. Page numbers can be enabled separately.</dd>
             <dt>Body size and line spacing</dt>
             <dd>Change the type size and vertical breathing room, affecting readability and pagination.</dd>
             <dt>Paragraphs and alignment</dt>
             <dd>Choose first-line indents or paragraph gaps, then left alignment or justified text.</dd>
-            <dt>New page per chapter</dt>
-            <dd>Starts each chapter on a fresh page in PDF and print-ready HTML.</dd>
-            <dt>PDF running matter</dt>
-            <dd>Adds running headers and page numbers to PDF exports; it does not affect EPUB or Markdown.</dd>
+            <dt>New page per major division</dt>
+            <dd>Starts each major division on a fresh page in PDF and print-ready HTML.</dd>
+
           </dl>
         </div>
         <p class="guide-foot">Export settings affect presentation only. Page pagination is controlled by the reader in EPUB; Markdown uses the chapter-heading choice.</p>
@@ -239,7 +279,7 @@
       </div>
       <div class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
       <dl class="stats">
-        <div><dt>Chapters</dt><dd id="s-chapters">0/0</dd></div>
+        <div><dt id="s-units-label">Chapters</dt><dd id="s-chapters">0/0</dd></div>
         <div><dt>Words written</dt><dd id="s-words">0</dd></div>
         <div><dt>Tokens</dt><dd id="s-tokens">0</dd></div>
         <div><dt>Throughput</dt><dd id="s-speed">—</dd></div>
@@ -318,7 +358,7 @@
               <option value="wide">Wide — more white space</option>
             </select>
           </label>
-          <label class="mini"><span>Chapter heading</span>
+          <label class="mini"><span>Division heading</span>
             <select id="exp-chapter-heading">
               <option value="chapter" selected>Chapter 1</option>
               <option value="number">1.</option>
@@ -355,11 +395,26 @@
             </select>
           </label>
         </div>
-        <div class="export-checks">
-          <label><input type="checkbox" id="exp-chapter-break" checked> Start each chapter on a new page</label>
-          <label><input type="checkbox" id="exp-running-matter" checked> PDF running header and page numbers</label>
+        <div class="export-controls">
+          <label class="mini"><span>Export title</span><input id="exp-title" maxlength="120" placeholder="Use outline title"></label>
+          <label class="mini"><span>Export subtitle</span><input id="exp-subtitle" maxlength="180" placeholder="Use outline subtitle"></label>
+          <label class="mini"><span>Division name</span>
+            <select id="exp-unit-label"><option value="chapter">Chapter</option><option value="section">Section</option><option value="essay">Essay</option><option value="entry">Entry</option></select>
+          </label>
+          <label class="mini"><span>Group name</span>
+            <select id="exp-part-label"><option value="part">Part</option><option value="book">Book</option><option value="volume">Volume</option></select>
+          </label>
+          <label class="mini"><span>PDF header left</span><input id="exp-header-left" maxlength="80" placeholder="Book title"></label>
+          <label class="mini"><span>PDF header right</span><input id="exp-header-right" maxlength="80" value="BOOKWRIGHT"></label>
         </div>
-        <p class="hint">Page size and page breaks apply to PDF and print-ready HTML. EPUB readers control pagination; Markdown uses the chapter-heading choice only.</p>
+        <div class="export-checks">
+          <label><input type="checkbox" id="exp-chapter-break" checked> Start each major division on a new page</label>
+          <label><input type="checkbox" id="exp-title-page" checked> Include title page (HTML, EPUB, PDF)</label>
+          <label><input type="checkbox" id="exp-subtitle-visible" checked> Show subtitle</label>
+          <label><input type="checkbox" id="exp-running-matter" checked> PDF running header</label>
+          <label><input type="checkbox" id="exp-page-numbers" checked> PDF page numbers</label>
+        </div>
+        <p class="hint">PDF header text and page numbers are separate. EPUB readers control pagination; Markdown always includes the document title and follows the division-heading choice.</p>
       </details>
       <div class="export-grid" id="export-grid"></div>
       <p class="hint" id="export-hint">Files build on demand from what has been written.</p>

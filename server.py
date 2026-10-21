@@ -63,6 +63,10 @@ class BookRequest(BaseModel):
     voice_sample: str = Field(default="", max_length=config.MAX_VOICE_SAMPLE_CHARS)
     pov: str = config.DEFAULT_POV
     review_outline: bool = config.DEFAULT_REVIEW_OUTLINE
+    unit_label: Literal["chapter", "section", "essay", "entry"] = "chapter"
+    part_label: Literal["part", "book", "volume"] = "part"
+    subheading_style: Literal["none", "few", "standard", "detailed"] = "standard"
+    group_count: int | None = Field(default=None, ge=1, le=config.MAX_PARTS)
     architect_model: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
     writer_model: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
     editor_model: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
@@ -282,6 +286,10 @@ async def create_book(payload: BookRequest, request: Request) -> JSONResponse:
         voice_sample=payload.voice_sample,
         pov=payload.pov,
         review_outline=payload.review_outline,
+        unit_label=payload.unit_label,
+        part_label=payload.part_label,
+        subheading_style=payload.subheading_style,
+        group_count_override=payload.group_count,
     )
     provider = _provider(api_key, **selected_models)
     job = store.create(spec, provider)
@@ -292,6 +300,8 @@ async def create_book(payload: BookRequest, request: Request) -> JSONResponse:
         {
             "id": job.id,
             "mode": provider.name,
+            "unit_label": spec.unit_label,
+            "part_label": spec.part_label,
             "estimate": estimate(spec),
             "models": {
                 "architect": provider.architect_model,
@@ -544,6 +554,15 @@ async def export_book(
     alignment: Literal["justify", "left"] = "justify",
     chapter_new_page: bool = True,
     running_matter: bool = True,
+    page_numbers: bool = True,
+    unit_label: Literal["chapter", "section", "essay", "entry"] | None = None,
+    part_label: Literal["part", "book", "volume"] | None = None,
+    title: str = Query(default="", max_length=120),
+    subtitle: str = Query(default="", max_length=180),
+    show_title_page: bool = True,
+    show_subtitle: bool = True,
+    header_left: str = Query(default="", max_length=80),
+    header_right: str = Query(default="BOOKWRIGHT", max_length=80),
 ) -> Response:
     job = store.get(job_id)
     if not job:
@@ -570,6 +589,15 @@ async def export_book(
         alignment=alignment,
         chapter_new_page=chapter_new_page,
         running_matter=running_matter,
+        page_numbers=page_numbers,
+        unit_label=unit_label or job.spec.unit_label,
+        part_label=part_label or job.spec.part_label,
+        title_override=title,
+        subtitle_override=subtitle,
+        show_title_page=show_title_page,
+        show_subtitle=show_subtitle,
+        header_left=header_left,
+        header_right=header_right,
     )
     try:
         # PDF layout is CPU-bound; keep it off the event loop.

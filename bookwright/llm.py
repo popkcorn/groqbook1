@@ -85,7 +85,8 @@ class Provider(Protocol):
 
     def write_chapter(
         self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = "",
-        pov: str = "", voice_sample: str = "",
+        pov: str = "", voice_sample: str = "", unit_label: str = "chapter",
+        part_label: str = "part",
     ) -> AsyncIterator[dict]:
         ...
 
@@ -396,7 +397,8 @@ class GroqProvider:
 
     async def write_chapter(
         self, *, plan: Plan, chapter: Chapter, part_title: str, bible: str, style: str = "",
-        pov: str = "", voice_sample: str = "",
+        pov: str = "", voice_sample: str = "", unit_label: str = "chapter",
+        part_label: str = "part",
     ) -> AsyncIterator[dict]:
         from . import prompts
 
@@ -406,6 +408,7 @@ class GroqProvider:
             messages = prompts.chapter_messages(
                 plan=plan, chapter=chapter, part_title=part_title, bible=bible,
                 style=style, continuation=attempt > 0, pov=pov, voice_sample=voice_sample,
+                unit_label=unit_label, part_label=part_label,
             )
             if attempt > 0 and buffer:
                 messages[-1]["content"] += "\n\nAlready written (do not repeat):\n" + buffer[-1200:]

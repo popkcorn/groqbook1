@@ -33,8 +33,25 @@ class ExportOptions:
     alignment: str = "justify"
     chapter_new_page: bool = True
     running_matter: bool = True
+    page_numbers: bool = True
+    unit_label: str = "chapter"
+    part_label: str = "part"
+    title_override: str = ""
+    subtitle_override: str = ""
+    show_title_page: bool = True
+    show_subtitle: bool = True
+    header_left: str = ""
+    header_right: str = "BOOKWRIGHT"
 
     def __post_init__(self):
+        if self.unit_label not in UNIT_LABELS:
+            raise ValueError(f"unit_label must be one of {sorted(UNIT_LABELS)}")
+        if self.part_label not in PART_LABELS:
+            raise ValueError(f"part_label must be one of {sorted(PART_LABELS)}")
+        if len(self.title_override) > 120 or len(self.subtitle_override) > 180:
+            raise ValueError("title/subtitle override is too long")
+        if len(self.header_left) > 80 or len(self.header_right) > 80:
+            raise ValueError("PDF header text must be 80 characters or fewer")
         if self.page_size not in PAGE_SIZES:
             raise ValueError(f"page_size must be one of {sorted(PAGE_SIZES)}")
         if self.margins not in PAGE_MARGINS:
@@ -55,6 +72,8 @@ PAGE_SIZES = {"a5": "A5", "a4": "A4", "letter": "Letter"}
 # Horizontal, top, bottom in millimetres.
 PAGE_MARGINS = {"narrow": (12, 14, 15), "normal": (17, 19, 20), "wide": (25, 25, 25)}
 CHAPTER_HEADINGS = {"chapter", "number", "title"}
+UNIT_LABELS = {"chapter", "section", "essay", "entry"}
+PART_LABELS = {"part", "book", "volume"}
 FONT_SIZES = {9, 10, 11, 12, 13, 14}
 LINE_SPACING = {"compact": 1.3, "normal": 1.5, "airy": 1.8}
 PARAGRAPH_STYLES = {"indent", "space"}
@@ -93,12 +112,28 @@ def _normalized_export_inputs(plan: Plan, chapters: dict[int, dict]) -> tuple[Pl
     return plan_copy, chapters_copy
 
 
-def _chapter_marker(index: int, style: str) -> str:
+def _plural(label: str) -> str:
+    if label.endswith("y") and label[-2:-1] not in "aeiou":
+        return label[:-1] + "ies"
+    if label.endswith(("s", "x", "ch", "sh")):
+        return label + "es"
+    return label + "s"
+
+
+def _chapter_marker(index: int, style: str, unit_label: str = "chapter") -> str:
     if style == "chapter":
-        return f"Chapter {index}"
+        return f"{unit_label.title()} {index}"
     if style == "number":
         return f"{index}."
     return ""
+
+
+def _display_title(plan: Plan, options: ExportOptions) -> str:
+    return (options.title_override.strip() or plan.title).translate(EXPORT_HYPHENS)
+
+
+def _display_subtitle(plan: Plan, options: ExportOptions) -> str:
+    return (options.subtitle_override.strip() or plan.subtitle).translate(EXPORT_HYPHENS)
 
 
 FONT_DIRS = [
@@ -248,16 +283,19 @@ def to_markdown(
 ) -> str:
     options = options or DEFAULT_EXPORT_OPTIONS
     plan, chapters = _normalized_export_inputs(plan, chapters)
-    lines = [f"# {plan.title}", "", f"*{plan.subtitle}*", ""]
+    title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
+    lines = [f"# {title}", ""]
+    if options.show_subtitle and subtitle:
+        lines += [f"*{subtitle}*", ""]
     if plan.thesis:
         lines += [f"> {plan.thesis}", ""]
     lines += ["---", ""]
     for part in plan.parts:
-        lines += [f"## {part.title}", ""]
+        lines += [f"## {options.part_label.title()} {part.index}: {part.title}", ""]
         if part.summary:
             lines += [f"*{part.summary}*", ""]
         for chapter in part.chapters:
-            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
             if marker and options.chapter_heading == "chapter":
                 marker += "."
             heading = f"{marker} {chapter.title}".strip()
@@ -340,12 +378,14 @@ def to_html(
     options = options or DEFAULT_EXPORT_OPTIONS
     plan, chapters = _normalized_export_inputs(plan, chapters)
     stamp = (generated_at or datetime.now(UTC)).strftime("%d %B %Y")
+    title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
     toc = ['<nav class="toc" id="contents"><h2>Contents</h2><ol>']
     for part in plan.parts:
-        toc.append(f'<li class="part"><a href="#part-{part.index}">{html.escape(part.title)}</a>')
+        part_heading = f"{options.part_label.title()} {part.index}: {part.title}"
+        toc.append(f'<li class="part"><a href="#part-{part.index}">{html.escape(part_heading)}</a>')
         toc.append("<ol>")
         for chapter in part.chapters:
-            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
             toc.append(
                 f'<li class="ch"><a href="#ch-{chapter.index}">'
                 + (f'<span>{html.escape(marker)}</span>' if marker else "")
@@ -357,14 +397,14 @@ def to_html(
     body: list[str] = []
     for part in plan.parts:
         body.append(
-            f'<section class="part-title" id="part-{part.index}"><h2>Part {part.index}</h2>'
+            f'<section class="part-title" id="part-{part.index}"><h2>{options.part_label.title()} {part.index}</h2>'
             f"<h3>{html.escape(part.title)}</h3>"
             + (f"<p>{html.escape(part.summary)}</p>" if part.summary else "")
             + "</section>"
         )
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
-            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
             page_class = " page-break" if options.chapter_new_page else ""
             label = f'<div class="ch-num">{html.escape(marker)}</div>' if marker else ""
             body.append(
@@ -374,20 +414,31 @@ def to_html(
                 f"{blocks_to_html(parse_markdown(text))}</article>"
             )
 
+    cover_html = ""
+    if options.show_title_page:
+        cover_parts = [
+            '<section class="cover"><div class="kicker">A book written with Bookwright</div>',
+            '<div class="rule"></div>',
+            f"<h1>{html.escape(title)}</h1>",
+        ]
+        if options.show_subtitle and subtitle:
+            cover_parts.append(f'<p class="sub">{html.escape(subtitle)}</p>')
+        cover_parts.append(
+            f'<div class="meta">{html.escape(plan.audience)} · {len(plan.chapters)} '
+            f'{_plural(options.unit_label)} · {stamp}</div>'
+        )
+        if plan.thesis:
+            cover_parts.append(f'<p class="thesis">{html.escape(plan.thesis)}</p>')
+        cover_parts.append("</section>")
+        cover_html = "".join(cover_parts)
+
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(plan.title)}</title>
+<title>{html.escape(title)}</title>
 <style>{HTML_CSS.replace('@page { size:A5; margin:19mm 17mm 20mm;', f'@page {{ size:{PAGE_SIZES[options.page_size]}; margin:{PAGE_MARGINS[options.margins][1]}mm {PAGE_MARGINS[options.margins][0]}mm {PAGE_MARGINS[options.margins][2]}mm;')}</style></head>
 <body style="--body-size:{options.body_font_size}pt; --line-spacing:{LINE_SPACING[options.line_spacing]}; --body-align:{options.alignment}; --paragraph-indent:{'1.4em' if options.paragraph_style == 'indent' else '0'}; --paragraph-gap:{'0' if options.paragraph_style == 'indent' else '0.75em'};"><div class="page">
-<section class="cover">
-  <div class="kicker">A book written with Bookwright</div>
-  <div class="rule"></div>
-  <h1>{html.escape(plan.title)}</h1>
-  <p class="sub">{html.escape(plan.subtitle)}</p>
-  <div class="meta">{plan.audience} · {len(plan.chapters)} chapters · {stamp}</div>
-  {f'<p class="thesis">{html.escape(plan.thesis)}</p>' if plan.thesis else ''}
-</section>
+{cover_html}
 {''.join(toc)}
 {''.join(body)}
 <section class="colophon"><p>Set in DejaVu Serif. Generated {stamp} from a plan by
@@ -428,29 +479,32 @@ def to_epub(
 ) -> bytes:
     options = options or DEFAULT_EXPORT_OPTIONS
     plan, chapters = _normalized_export_inputs(plan, chapters)
-    book_id = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, plan.title + plan.subtitle)}"
+    title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
+    book_id = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, title + subtitle)}"
     modified = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     docs: list[tuple[str, str, str]] = []  # (id, filename, xhtml)
     title_body = (
-        f'<div class="title"><h1>{html.escape(plan.title)}</h1>'
-        f'<p class="sub">{html.escape(plan.subtitle)}</p>'
-        f'<p class="meta">{html.escape(plan.audience)}</p></div>'
+        f'<div class="title"><h1>{html.escape(title)}</h1>'
+        + (f'<p class="sub">{html.escape(subtitle)}</p>' if options.show_subtitle and subtitle else "")
+        + f'<p class="meta">{html.escape(plan.audience)}</p></div>'
     )
-    docs.append(("titlepage", "title.xhtml", XHTML.format(title="Title", body=title_body)))
+    if options.show_title_page:
+        docs.append(("titlepage", "title.xhtml", XHTML.format(title="Title", body=title_body)))
 
     toc_items: list[str] = []
     for part in plan.parts:
         part_body = (
-            f"<h1>{html.escape(part.title)}</h1>"
+            f"<h1>{options.part_label.title()} {part.index}: {html.escape(part.title)}</h1>"
             + (f"<p>{html.escape(part.summary)}</p>" if part.summary else "")
         )
         name = f"part{part.index}.xhtml"
         docs.append((f"part{part.index}", name, XHTML.format(title=part.title, body=part_body)))
-        toc_items.append(f'<li><a href="{name}">{html.escape(part.title)}</a><ol>')
+        part_heading = f"{options.part_label.title()} {part.index}: {part.title}"
+        toc_items.append(f'<li><a href="{name}">{html.escape(part_heading)}</a><ol>')
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
-            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
             break_class = " chapter-break" if options.chapter_new_page else ""
             label = f'<p class="chapter-num">{html.escape(marker)}</p>' if marker else ""
             body = (
@@ -487,10 +541,10 @@ def to_epub(
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="bookid">{book_id}</dc:identifier>
-    <dc:title>{html.escape(plan.title)}</dc:title>
+    <dc:title>{html.escape(title)}</dc:title>
     <dc:language>en</dc:language>
     <dc:creator>Bookwright</dc:creator>
-    <dc:description>{html.escape(plan.thesis or plan.subtitle)}</dc:description>
+    <dc:description>{html.escape(plan.thesis or subtitle)}</dc:description>
     <meta property="dcterms:modified">{modified}</meta>
   </metadata>
   <manifest>
@@ -696,17 +750,19 @@ def to_pdf(
         ),
     }
 
+    title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
     pagesize = {"a5": A5, "a4": A4, "letter": LETTER}[options.page_size]
     page_w, page_h = pagesize
     margin_x, margin_top, margin_bottom = (value * mm for value in PAGE_MARGINS[options.margins])
-    book_title = plan.title.upper()
+    book_title = (options.header_left.strip() or title).translate(EXPORT_HYPHENS).upper()
+    header_right = options.header_right.strip().translate(EXPORT_HYPHENS).upper()
 
     class BookDoc(BaseDocTemplate):
         def __init__(self, target):
             super().__init__(
                 target, pagesize=pagesize, leftMargin=margin_x, rightMargin=margin_x,
                 topMargin=margin_top, bottomMargin=margin_bottom,
-                title=plan.title, author="Bookwright", subject=plan.subtitle,
+                title=title, author="Bookwright", subject=subtitle,
                 creator="Bookwright",
             )
             frame = Frame(
@@ -724,21 +780,25 @@ def to_pdf(
             )
 
         def _decorate(self, canvas, doc):
-            if not options.running_matter:
+            if not options.running_matter and not options.page_numbers:
                 return
             canvas.saveState()
-            canvas.setFont(sans, 6.6)
-            canvas.setFillColor(colors.HexColor("#8a7d6c"))
-            canvas.drawString(margin_x, page_h - margin_top + 6 * mm, book_title)
-            canvas.drawRightString(page_w - margin_x, page_h - margin_top + 6 * mm,
-                                   "BOOKWRIGHT")
-            canvas.setStrokeColor(colors.HexColor("#d9cfc0"))
-            canvas.setLineWidth(0.4)
-            canvas.line(margin_x, page_h - margin_top + 4.5 * mm,
-                        page_w - margin_x, page_h - margin_top + 4.5 * mm)
-            canvas.setFont(serif, 8.5)
-            canvas.setFillColor(colors.HexColor("#5a4f43"))
-            canvas.drawCentredString(page_w / 2, margin_bottom - 9 * mm, str(doc.page))
+            if options.running_matter:
+                canvas.setFont(sans, 6.6)
+                canvas.setFillColor(colors.HexColor("#8a7d6c"))
+                if book_title:
+                    canvas.drawString(margin_x, page_h - margin_top + 6 * mm, book_title)
+                if header_right:
+                    canvas.drawRightString(page_w - margin_x, page_h - margin_top + 6 * mm,
+                                           header_right)
+                canvas.setStrokeColor(colors.HexColor("#d9cfc0"))
+                canvas.setLineWidth(0.4)
+                canvas.line(margin_x, page_h - margin_top + 4.5 * mm,
+                            page_w - margin_x, page_h - margin_top + 4.5 * mm)
+            if options.page_numbers:
+                canvas.setFont(serif, 8.5)
+                canvas.setFillColor(colors.HexColor("#5a4f43"))
+                canvas.drawCentredString(page_w / 2, margin_bottom - 9 * mm, str(doc.page))
             canvas.restoreState()
 
         def afterFlowable(self, flowable):
@@ -757,27 +817,31 @@ def to_pdf(
     doc = BookDoc(buffer)
     story: list = [NextPageTemplate("body")]
 
-    # Cover (drawn on the bare template, then we switch to the decorated one)
-    story += [
-        Spacer(1, 38 * mm),
-        Paragraph("A BOOK WRITTEN WITH BOOKWRIGHT", styles["cover_kicker"]),
-        HRFlowable(width=28 * mm, thickness=1.2, color=colors.HexColor("#17130f"),
-                   spaceBefore=0, spaceAfter=16),
-        Paragraph(html.escape(plan.title), styles["cover_title"]),
-        Paragraph(html.escape(plan.subtitle), styles["cover_sub"]),
-        HRFlowable(width=12 * mm, thickness=0.6, color=colors.HexColor("#c8963e"),
-                   spaceBefore=2, spaceAfter=14),
-        Paragraph(
-            html.escape(
-                f"{plan.audience} · {len(plan.chapters)} chapters · "
-                f"{(generated_at or datetime.now(UTC)).strftime('%B %Y')}"
+    # Optional cover (drawn on the bare template, then switch to body pages).
+    if options.show_title_page:
+        story += [
+            Spacer(1, 38 * mm),
+            Paragraph("A BOOK WRITTEN WITH BOOKWRIGHT", styles["cover_kicker"]),
+            HRFlowable(width=28 * mm, thickness=1.2, color=colors.HexColor("#17130f"),
+                       spaceBefore=0, spaceAfter=16),
+            Paragraph(html.escape(title), styles["cover_title"]),
+        ]
+        if options.show_subtitle and subtitle:
+            story.append(Paragraph(html.escape(subtitle), styles["cover_sub"]))
+        story += [
+            HRFlowable(width=12 * mm, thickness=0.6, color=colors.HexColor("#c8963e"),
+                       spaceBefore=2, spaceAfter=14),
+            Paragraph(
+                html.escape(
+                    f"{plan.audience} · {len(plan.chapters)} {_plural(options.unit_label)} · "
+                    f"{(generated_at or datetime.now(UTC)).strftime('%B %Y')}"
+                ),
+                styles["cover_meta"],
             ),
-            styles["cover_meta"],
-        ),
-    ]
-    if plan.thesis:
-        story.append(Paragraph(html.escape(plan.thesis), styles["cover_thesis"]))
-    story.append(PageBreak())
+        ]
+        if plan.thesis:
+            story.append(Paragraph(html.escape(plan.thesis), styles["cover_thesis"]))
+        story.append(PageBreak())
 
     # Contents
     story += [Paragraph("Contents", styles["toc_title"])]
@@ -789,7 +853,7 @@ def to_pdf(
     for part in plan.parts:
         story += [
             Spacer(1, 34 * mm),
-            Paragraph(f"PART {part.index}", styles["part_label"]),
+            Paragraph(f"{options.part_label.upper()} {part.index}", styles["part_label"]),
             Paragraph(html.escape(part.title), styles["part_title"]),
         ]
         if part.summary:
@@ -798,7 +862,7 @@ def to_pdf(
 
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
-            marker = _chapter_marker(chapter.index, options.chapter_heading)
+            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
             if marker:
                 story.append(Paragraph(html.escape(marker.upper()), styles["chapter_label"]))
             story.append(Paragraph(html.escape(chapter.title), styles["chapter_title"]))
@@ -831,9 +895,10 @@ def to_pdf(
         story.append(PageBreak())
 
     stamp = (generated_at or datetime.now(UTC)).strftime("%d %B %Y")
+    colophon_title = f"{title} — {subtitle}" if options.show_subtitle and subtitle else title
     story += [
         Spacer(1, 40 * mm),
-        Paragraph(f"{html.escape(plan.title)} — {html.escape(plan.subtitle)}", styles["toc_part"]),
+        Paragraph(html.escape(colophon_title), styles["toc_part"]),
         Spacer(1, 4 * mm),
         Paragraph(
             f"Generated on {stamp} by Bookwright: an architect model planned the book, "
@@ -857,7 +922,7 @@ def export(
 ) -> tuple[bytes, str, str]:
     """Return (bytes, filename, content type)."""
     options = options or DEFAULT_EXPORT_OPTIONS
-    base = slug(plan.title)
+    base = slug(_display_title(plan, options))
     if fmt == "md":
         return to_markdown(plan, chapters, options=options).encode("utf-8"), f"{base}.md", "text/markdown; charset=utf-8"
     if fmt == "html":

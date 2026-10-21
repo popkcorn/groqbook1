@@ -63,6 +63,10 @@ def style_block(
 def plan_messages(
     *, topic: str, audience: str, tone: str, length, notes: str = ""
 ) -> list[dict]:
+    unit_label = getattr(length, "unit_label", "chapter")
+    part_label = getattr(length, "part_label", "part")
+    unit_article = "an" if unit_label[:1].lower() in "aeiou" else "a"
+    part_article = "an" if part_label[:1].lower() in "aeiou" else "a"
     tone_desc = config.TONES.get(tone, tone)
     system = (
         "You are the architect of a short, well-argued nonfiction book. "
@@ -71,11 +75,15 @@ def plan_messages(
         f"{PLAN_JSON_SHAPE}\n\n"
         "Rules:\n"
         "- Parts are movements of an argument, not a table of contents of topics.\n"
-        "- Chapters must not overlap: each one owns a distinct claim or step.\n"
+        f"- Call each major division {unit_article} {unit_label}; "
+        f"call each grouping {part_article} {part_label}. The JSON keys "
+        "remain 'parts' and 'chapters' for compatibility.\n"
+        f"- Each {getattr(length, 'unit_label', 'chapter')} should own a distinct claim or step; "
+        "divisions of around 2,000 words are short units, not paragraphs.\n"
         "- Beats are instructions to a writer, specific enough to draft from. "
         "Never write 'discuss', 'explore', or 'cover' as a beat.\n"
-        "- Avoid 'Introduction', 'Conclusion', 'Foreword' and 'Summary' chapters; "
-        "the first chapter should open on substance and the last should land the thesis.\n"
+        f"- Avoid 'Introduction', 'Conclusion', 'Foreword' and 'Summary' {getattr(length, 'unit_label', 'chapter')} titles; "
+        "the first division should open on substance and the last should land the thesis.\n"
         "- Titles are concrete and slightly surprising. No colons in every title.\n"
         "- All strings are plain text: no markdown, no numbering inside titles."
     )
@@ -147,7 +155,7 @@ def build_bible(
             lines.append(f"- **{title}** — {text}")
         written = "\n".join(lines)
     else:
-        written = "- This is the first chapter. Establish the voice and the central claim."
+        written = "- This is the first major division. Establish the voice and the central claim."
     notes = (notes or "").strip()[: config.MAX_NOTES_CHARS]
     notes_block = (
         "\n## Author's notes and sources\n"
@@ -181,22 +189,24 @@ def chapter_messages(
     continuation: bool = False,
     pov: str = "",
     voice_sample: str = "",
+    unit_label: str = "chapter",
+    part_label: str = "part",
 ) -> list[dict]:
     beats = "\n".join(f"{i}. {b}" for i, b in enumerate(chapter.beats, 1)) or "1. (writer's discretion)"
     system = (
-        "You are the author of a nonfiction book. You write one chapter at a time, "
+        f"You are the author of a nonfiction book. You write one {unit_label} at a time, "
         "in Markdown, as finished prose.\n\n"
         "Craft rules:\n"
-        "- Open with a concrete image, scene or claim. Never open with "
-        "'In this chapter' or a dictionary definition.\n"
-        "- Use '## ' for two to four section headings inside the chapter. "
-        "Never repeat the chapter title as a heading.\n"
+        f"- Open with a concrete image, scene or claim. Never open with "
+        f"'In this {unit_label}' or a dictionary definition.\n"
+        "- Follow the requested internal heading style in the voice constraints. "
+        "Never repeat the division title as a heading.\n"
         "- Prefer flowing paragraphs. Use a bulleted list only when enumerating real items.\n"
         "- One idea per paragraph; vary sentence length; no filler transitions.\n"
-        "- Refer to earlier chapters naturally, as an author would, not as a summariser.\n"
+        f"- Refer to earlier {unit_label}s naturally, as an author would, not as a summariser.\n"
         "- No meta-commentary about being an AI, no requests to the reader, no citations "
         "you cannot support.\n"
-        "- End the chapter on a line that makes the next chapter feel necessary.\n"
+        f"- End the {unit_label} on a line that makes the next one feel necessary.\n"
         f"- Length: about {chapter.words} words. Stop when the chapter is done.\n"
     )
     if style.strip():
@@ -217,11 +227,11 @@ def chapter_messages(
         )
     user = (
         f"{bible}\n\n"
-        f"# Part: {part_title}\n"
-        f"# Chapter {chapter.index}: {chapter.title}\n\n"
-        f"Job of this chapter: {chapter.purpose}\n\n"
+        f"# {part_label.title()}: {part_title}\n"
+        f"# {unit_label.title()} {chapter.index}: {chapter.title}\n\n"
+        f"Job of this {unit_label}: {chapter.purpose}\n\n"
         f"Beats to hit, in order:\n{beats}\n\n"
-        "Write the chapter now. Output only the chapter body in Markdown."
+        f"Write the {unit_label} now. Output only its body in Markdown."
     )
     if continuation:
         user += "\n\n(You were cut off. Continue from the exact word you stopped on. Do not repeat text.)"

@@ -29,6 +29,8 @@
     startedAt: 0,
     modelDefaults: {},
     modelCatalog: [],
+    unitLabel: "chapter",
+    partLabel: "part",
   };
 
   const L = {
@@ -37,6 +39,18 @@
     epub: ["EPUB", ".epub"],
     pdf: ["PDF", ".pdf"],
   };
+
+  function pluralLabel(word) {
+    if (word.endsWith("y") && !/[aeiou]y$/.test(word)) return `${word.slice(0, -1)}ies`;
+    if (/(s|x|ch|sh)$/.test(word)) return `${word}es`;
+    return `${word}s`;
+  }
+  function quantity(count, word) { return `${count} ${count === 1 ? word : pluralLabel(word)}`; }
+  function unitLabel() { return $("#unit-label")?.value || state.unitLabel || "chapter"; }
+  function partLabel() { return $("#part-label")?.value || state.partLabel || "part"; }
+  function article(word) { return "aeiou".includes(word[0]?.toLowerCase()) ? "an" : "a"; }
+  function unitTitle() { const word = unitLabel(); return word[0].toUpperCase() + word.slice(1); }
+  function partTitle() { const word = partLabel(); return word[0].toUpperCase() + word.slice(1); }
 
   // --------------------------------------------------------------- markdown
   function esc(s) {
@@ -310,6 +324,48 @@
     tone.addEventListener("change", updateToneHint);
     updateToneHint();
 
+    $("#unit-label").value = state.unitLabel;
+    $("#part-label").value = state.partLabel;
+    const syncStructure = () => {
+      state.unitLabel = unitLabel();
+      state.partLabel = partLabel();
+      document.querySelectorAll("#lengths .chip span").forEach((node, index) => {
+        const preset = presets.lengths[index];
+        node.textContent = preset.blurb.replace(/chapters?/gi, (match) =>
+          match.toLowerCase().endsWith("s") ? pluralLabel(unitLabel()) : unitLabel());
+      });
+      const lengthInfo = currentLength(presets);
+      const chapterCount = lengthInfo.chapters || 10;
+      const words = Number($("#c-words").value) || 1000;
+      const automaticGroups = state.length === "custom"
+        ? Math.max(1, Math.min(Math.round(chapterCount / 4), 6)) : (lengthInfo.parts || 1);
+      if (Number($("#group-count").value) > chapterCount) $("#group-count").value = "";
+      const groups = Number($("#group-count").value) || automaticGroups;
+      [...$("#group-count").options].forEach((option) => {
+        if (!option.value) return;
+        const count = Number(option.value);
+        option.disabled = count > chapterCount;
+        option.textContent = quantity(count, partLabel());
+      });
+      $("#custom-units-label").textContent = pluralLabel(unitLabel());
+      $("#custom-words-label").textContent = `Words / ${unitLabel()}`;
+      $("#s-units-label").textContent = pluralLabel(unitLabel())[0].toUpperCase() + pluralLabel(unitLabel()).slice(1);
+      $("#o-add").textContent = `Add ${article(unitLabel())} ${unitLabel()}`;
+      $("#custom-summary").textContent = `${quantity(chapterCount, unitLabel())} · ${quantity(groups, partLabel())} · ~${compact(Number(chapterCount) * words)} words`;
+      const option = $("#exp-chapter-heading")?.querySelector('option[value="chapter"]');
+      if (option) option.textContent = `${unitTitle()} 1`;
+      updateEstimate(presets);
+    };
+    $("#unit-label").addEventListener("change", syncStructure);
+    $("#part-label").addEventListener("change", syncStructure);
+    $("#group-count").addEventListener("change", syncStructure);
+    $("#exp-unit-label").addEventListener("change", () => {
+      const option = $("#exp-chapter-heading").querySelector('option[value="chapter"]');
+      option.textContent = `${$("#exp-unit-label").value[0].toUpperCase()}${$("#exp-unit-label").value.slice(1)} 1`;
+    });
+    $("#c-chapters").addEventListener("input", syncStructure);
+    $("#c-words").addEventListener("input", syncStructure);
+
     const chips = $("#lengths");
     presets.lengths.forEach((preset) => {
       const chip = el("button", "chip");
@@ -321,13 +377,14 @@
         state.length = preset.id;
         [...chips.children].forEach((c) => c.setAttribute("aria-checked", String(c === chip)));
         $("#custom-length").hidden = preset.id !== "custom";
-        updateEstimate(presets);
+        syncStructure();
       });
       chip.setAttribute("aria-checked", String(preset.id === presets.defaults.length));
       chips.append(chip);
     });
     state.length = presets.defaults.length;
     state.presets = presets;
+    syncStructure();
 
     // Custom length inputs
     const chap = $("#c-chapters");
@@ -340,8 +397,12 @@
       chap.value = Math.min(Math.max(Number(chap.value) || minCh, minCh), maxCh);
       words.value = Math.min(Math.max(Number(words.value) || minW, minW), maxW);
       const total = Number(chap.value) * Number(words.value);
+      const automaticGroups = Math.max(1, Math.min(Math.round(Number(chap.value) / 4), 6));
+      const groups = Math.min(Number($("#group-count").value) || automaticGroups, Number(chap.value));
       $("#custom-summary").textContent =
-        `${chap.value} chapters · ~${nf.format(total)} words`;
+        `${quantity(Number(chap.value), unitLabel())} · ${quantity(groups, partLabel())} · ~${nf.format(total)} words`;
+      $("#custom-units-label").textContent = pluralLabel(unitLabel());
+      $("#custom-words-label").textContent = `Words / ${unitLabel()}`;
       updateEstimate(presets);
     };
     chap.addEventListener("input", syncCustom);
@@ -512,9 +573,14 @@
     if (notesChars) styleBits.push(`${notesChars} chars of notes`);
     const suffix = styleBits.length ? ` · ${styleBits.join(" + ")}` : "";
     const words = compact(p.total_words);
+    const automaticGroups = state.length === "custom"
+      ? Math.max(1, Math.min(Math.round(p.chapters / 4), 6)) : (p.parts || 1);
+    const groups = Math.min(Number($("#group-count")?.value) || automaticGroups, p.chapters);
+    const groupName = $("#part-label")?.value || "part";
+    const groupPhrase = quantity(groups, groupName);
     $("#estimate").textContent = state.key
-      ? `Live mode · ${p.chapters} chapters, about ${words} words of output${suffix}.`
-      : `Demo mode · ${p.chapters} chapters of fixture prose${suffix}. Add a Groq key for real writing.`;
+      ? `Live mode · ${p.chapters} ${pluralLabel(unitLabel())} in ${groupPhrase}, about ${words} words of output${suffix}.`
+      : `Demo mode · ${p.chapters} ${pluralLabel(unitLabel())} in ${groupPhrase}, fixture prose${suffix}. Add a Groq key for real writing.`;
   }
 
   function applyProfile(profile, presets) {
@@ -605,6 +671,10 @@
     payload.voice_sample = $("#voice-sample").value.trim();
     payload.pov = $("#pov").value || "auto";
     payload.review_outline = $("#review-outline").checked;
+    payload.unit_label = unitLabel();
+    payload.part_label = partLabel();
+    payload.subheading_style = $("#subheading-style").value;
+    payload.group_count = $("#group-count").value ? Number($("#group-count").value) : null;
     if (state.mode === "live") {
       payload.architect_model = $("#architect-model").value || null;
       payload.writer_model = $("#writer-model").value || null;
@@ -663,7 +733,7 @@
       const data = JSON.parse(e.data);
       renderPlan(data.plan);
       if (state.status !== "awaiting_outline") {
-        setStatus("Plan accepted — drafting chapters");
+        setStatus(`Plan accepted — drafting ${pluralLabel(unitLabel())}`);
       }
     });
 
@@ -671,7 +741,7 @@
       const data = JSON.parse(e.data);
       ensureChapter(data.index, data.title);
       setChapterStatus(data.index, "writing");
-      setStatus(`Writing chapter ${data.index}: ${data.title}`);
+      setStatus(`Writing ${unitLabel()} ${data.index}: ${data.title}`);
     });
 
     stream.addEventListener("delta", (e) => {
@@ -694,7 +764,7 @@
 
     stream.addEventListener("stylist_start", (e) => {
       const data = JSON.parse(e.data);
-      setStatus(`Editing chapter ${data.index} — ${data.flags} pattern${data.flags === 1 ? "" : "s"} flagged`);
+      setStatus(`Editing ${unitLabel()} ${data.index} — ${data.flags} pattern${data.flags === 1 ? "" : "s"} flagged`);
       const chapter = state.chapters.get(data.index);
       if (chapter && chapter.footNode) {
         const fixes = el("span", "fixes", "editing…");
@@ -729,7 +799,7 @@
 
     stream.addEventListener("stylist_rejected", (e) => {
       const data = JSON.parse(e.data);
-      toast(`Editorial pass skipped chapter ${data.index}: ${data.reason}`, 7000);
+      toast(`Editorial pass skipped ${unitLabel()} ${data.index}: ${data.reason}`, 7000);
     });
 
     stream.addEventListener("chapter_done", (e) => {
@@ -743,7 +813,7 @@
     stream.addEventListener("chapter_error", (e) => {
       const data = JSON.parse(e.data);
       setChapterStatus(data.index, "failed");
-      toast(`Chapter ${data.index} failed: ${data.message}`, 9000);
+      toast(`${unitTitle()} ${data.index} failed: ${data.message}`, 9000);
       paintToc();
     });
 
@@ -757,7 +827,7 @@
       state.chapters.forEach(paintChapterTools);
       const label =
         data.status === "partial"
-          ? `Finished with ${data.failed.length} failed chapter${data.failed.length === 1 ? "" : "s"}`
+          ? `Finished with ${data.failed.length} failed ${data.failed.length === 1 ? unitLabel() : pluralLabel(unitLabel())}`
           : `Book written in ${duration(data.elapsed)}`;
       setStatus(label);
       markRunDone(data.status === "partial" ? "error" : "done");
@@ -826,6 +896,14 @@
 
   function applySnapshot(snap) {
     state.status = snap.status;
+    if (snap.spec) {
+      state.unitLabel = snap.spec.unit_label || state.unitLabel;
+      state.partLabel = snap.spec.part_label || state.partLabel;
+      $("#unit-label").value = state.unitLabel;
+      $("#part-label").value = state.partLabel;
+      $("#subheading-style").value = snap.spec.subheading_style || "standard";
+      $("#group-count").value = snap.spec.group_count ? String(snap.spec.group_count) : "";
+    }
     if (snap.plan) renderPlan(snap.plan, snap.chapters);
     if (snap.status === "awaiting_outline" && snap.plan) {
       openOutline(snap.plan);
@@ -904,6 +982,10 @@
   // ---------------------------------------------------------------- render
   function renderPlan(plan, chapters) {
     state.plan = plan;
+    $("#exp-unit-label").value = state.unitLabel;
+    $("#exp-part-label").value = state.partLabel;
+    $("#exp-title").placeholder = plan.title || "Use outline title";
+    $("#exp-subtitle").placeholder = plan.subtitle || "Use outline subtitle";
     $("#empty").hidden = true;
     const book = $("#book");
     book.hidden = false;
@@ -915,7 +997,7 @@
       (() => { const h = el("h2", "", plan.title); return h; })(),
       el("p", "sub", plan.subtitle || ""),
       el("div", "rule"),
-      el("p", "meta", `${plan.audience} · ${plan.chapter_count} chapters · ${compact(plan.total_words)} words`)
+      el("p", "meta", `${plan.audience} · ${plan.chapter_count} ${pluralLabel(state.unitLabel)} · ${compact(plan.total_words)} words`)
     );
     const styleSummary = $("#style-panel") ? state.directives.length : 0;
     if (styleSummary) {
@@ -926,7 +1008,7 @@
 
     for (const part of plan.parts) {
       const divider = el("section", "part-divider");
-      divider.append(el("div", "num", `Part ${part.index}`), el("h3", "", part.title));
+      divider.append(el("div", "num", `${partTitle()} ${part.index}`), el("h3", "", part.title));
       if (part.summary) divider.append(el("p", "", part.summary));
       book.append(divider);
 
@@ -935,13 +1017,13 @@
         const article = el("article", "chapter pending");
         article.id = `chapter-${spec.index}`;
         const head = el("header");
-        head.append(el("div", "ch-num", `Chapter ${spec.index}`), el("h3", "", spec.title));
+        head.append(el("div", "ch-num", `${unitTitle()} ${spec.index}`), el("h3", "", spec.title));
         const body = el("div", "body");
         body.innerHTML = '<div class="skeleton w80"></div><div class="skeleton"></div><div class="skeleton w60"></div>';
         const foot = el("div", "ch-foot");
         foot.append(el("span", "flag", ""), el("span", "sep"));
         const tools = el("details", "chapter-tools");
-        const toolsSummary = el("summary", "", "Regenerate this chapter with a command");
+        const toolsSummary = el("summary", "", `Regenerate this ${unitLabel()} with a command`);
         const command = document.createElement("textarea");
         command.className = "regen-command";
         command.rows = 2;
@@ -950,13 +1032,13 @@
         command.value = chapter.regenCommand || "";
         command.addEventListener("input", () => { chapter.regenCommand = command.value; });
         const toolActions = el("div", "chapter-tool-actions");
-        const regenerate = el("button", "regen-btn", "Regenerate chapter");
+        const regenerate = el("button", "regen-btn", `Regenerate ${unitLabel()}`);
         regenerate.type = "button";
         regenerate.addEventListener("click", () => regenerateChapter(chapter.index));
         const undoRegeneration = el("button", "undo-regen-btn", "Undo regeneration");
         undoRegeneration.type = "button";
         undoRegeneration.addEventListener("click", () => undoChapterRegeneration(chapter.index));
-        const note = el("p", "regen-note", "Only this chapter changes; later chapters are not automatically rewritten. A Groq key is required for custom commands.");
+        const note = el("p", "regen-note", `Only this ${unitLabel()} changes; later ${pluralLabel(unitLabel())} are not automatically rewritten. A Groq key is required for custom commands.`);
         toolActions.append(regenerate, undoRegeneration);
         tools.append(toolsSummary, command, toolActions, note);
         article.append(head, body, foot, tools);
@@ -1125,12 +1207,12 @@
         body: JSON.stringify({ instruction }),
       });
       applyRegenerationResult(chapter, result);
-      setStatus(`Chapter ${index} regenerated`);
+      setStatus(`${unitTitle()} ${index} regenerated`);
     } catch (err) {
       chapter.regenerating = false;
       paintChapterTools(chapter);
       toast(err.message, 9000);
-      setStatus("Chapter regeneration failed; the existing text was kept");
+      setStatus(`${unitTitle()} regeneration failed; the existing text was kept`);
     }
   }
 
@@ -1249,7 +1331,7 @@
     host.replaceChildren();
     let n = 0;
     for (const part of state.outline.parts) {
-      const heading = el("p", "o-part", `Part ${part.index} · ${part.title || "untitled"}`);
+      const heading = el("p", "o-part", `${partTitle()} ${part.index} · ${part.title || "untitled"}`);
       host.append(heading);
       for (const chapter of part.chapters) {
         n += 1;
@@ -1262,14 +1344,14 @@
         title.className = "o-title";
         title.maxLength = 120;
         title.value = chapter.title || "";
-        title.setAttribute("aria-label", `Chapter ${n} title`);
+        title.setAttribute("aria-label", `${unitTitle()} ${n} title`);
         title.addEventListener("input", () => { chapter.title = title.value; });
         const drop = el("button", "o-drop", "×");
         drop.type = "button";
         drop.title = "Remove this chapter";
         drop.addEventListener("click", () => {
           if (outlineChapters().length <= 2) {
-            toast("A book needs at least two chapters.");
+            toast(`A book needs at least two ${pluralLabel(unitLabel())}.`);
             return;
           }
           part.chapters = part.chapters.filter((c) => c !== chapter);
@@ -1300,7 +1382,7 @@
         host.append(row);
       }
     }
-    $("#o-count").textContent = `${n} chapter${n === 1 ? "" : "s"} · edits apply to what gets written`;
+    $("#o-count").textContent = `${n} ${n === 1 ? unitLabel() : pluralLabel(unitLabel())} · edits apply to what gets written`;
   }
 
   function renumberOutline() {
@@ -1315,12 +1397,12 @@
   $("#o-add").addEventListener("click", () => {
     if (!state.outline) return;
     if (outlineChapters().length >= 20) {
-      toast("Twenty chapters is the ceiling.");
+      toast("The 20-division limit has been reached.");
       return;
     }
     const last = state.outline.parts[state.outline.parts.length - 1];
     last.chapters.push({
-      index: 0, title: "Untitled chapter", purpose: "", beats: [], terms: [], words: 0,
+      index: 0, title: `Untitled ${unitLabel()}`, purpose: "", beats: [], terms: [], words: 0,
     });
     renumberOutline();
     paintOutline();
@@ -1330,7 +1412,7 @@
     if (!state.outline || !state.job) return;
     const empty = outlineChapters().some((c) => !String(c.title || "").trim());
     if (empty) {
-      toast("Every chapter needs a title before you approve the outline.");
+      toast(`Every ${unitLabel()} needs a title before you approve the outline.`);
       return;
     }
     renumberOutline();
@@ -1357,7 +1439,7 @@
         body: JSON.stringify(body),
       });
       closeOutline();
-      setStatus("Outline approved — drafting chapters");
+      setStatus(`Outline approved — drafting ${pluralLabel(unitLabel())}`);
       if (res.plan) {
         state.chapters.clear();
         renderPlan(res.plan, []);
@@ -1447,6 +1529,15 @@
             alignment: $("#exp-alignment").value,
             chapter_new_page: String($("#exp-chapter-break").checked),
             running_matter: String($("#exp-running-matter").checked),
+            page_numbers: String($("#exp-page-numbers").checked),
+            unit_label: $("#exp-unit-label").value,
+            part_label: $("#exp-part-label").value,
+            title: $("#exp-title").value.trim(),
+            subtitle: $("#exp-subtitle").value.trim(),
+            show_title_page: String($("#exp-title-page").checked),
+            show_subtitle: String($("#exp-subtitle-visible").checked),
+            header_left: $("#exp-header-left").value.trim(),
+            header_right: $("#exp-header-right").value.trim(),
           });
           const res = await fetch(`/api/books/${state.job}/export/${fmt}?${options}`);
           if (!res.ok) {
@@ -1457,7 +1548,7 @@
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
-          a.download = `${slugify(state.plan?.title || "book")}.${fmt}`;
+          a.download = `${slugify($("#exp-title").value.trim() || state.plan?.title || "book")}.${fmt}`;
           document.body.append(a);
           a.click();
           a.remove();

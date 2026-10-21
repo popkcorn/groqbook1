@@ -26,6 +26,14 @@ from .schema import Plan, PlanError, parse_plan
 log = logging.getLogger("bookwright")
 
 
+def _plural_label(word: str) -> str:
+    if word.endswith("y") and word[-2:-1] not in "aeiou":
+        return word[:-1] + "ies"
+    if word.endswith(("s", "x", "ch", "sh")):
+        return word + "es"
+    return word + "s"
+
+
 @dataclass
 class BookSpec:
     topic: str
@@ -43,6 +51,10 @@ class BookSpec:
     voice_sample: str = ""
     pov: str = config.DEFAULT_POV
     review_outline: bool = config.DEFAULT_REVIEW_OUTLINE
+    unit_label: str = "chapter"
+    part_label: str = "part"
+    subheading_style: str = "standard"
+    group_count_override: int | None = None
 
     @property
     def length(self) -> config.LengthPreset:
@@ -52,23 +64,38 @@ class BookSpec:
         words = self.words_override or preset.words_per_chapter
         chapters = max(config.CHAPTERS_RANGE[0], min(chapters, config.MAX_CHAPTERS))
         words = max(config.WORDS_PER_CHAPTER_RANGE[0], min(words, config.WORDS_PER_CHAPTER_RANGE[1]))
-        if (chapters, words) == (preset.chapters, preset.words_per_chapter):
-            return preset
-        parts = max(1, min(round(chapters / 4), config.MAX_PARTS))
+        is_preset_shape = (chapters, words) == (preset.chapters, preset.words_per_chapter)
+        automatic_parts = preset.parts if is_preset_shape else max(1, min(round(chapters / 4), config.MAX_PARTS))
+        parts = max(1, min(self.group_count_override or automatic_parts, chapters, config.MAX_PARTS))
         return replace(
             preset,
             chapters=chapters,
             words_per_chapter=words,
             parts=parts,
-            blurb=f"{chapters} chapters · ~{chapters * words:,} words",
-            id="custom",
+            unit_label=self.unit_label,
+            part_label=self.part_label,
+            blurb=f"{chapters} {_plural_label(self.unit_label)} · ~{chapters * words:,} words",
+            id=preset.id if is_preset_shape else "custom",
         )
 
     @property
     def style(self) -> str:
         from .prompts import style_block
 
-        return style_block(self.clean_directives(), self.extra_instructions, self.clean_banned())
+        heading_rules = {
+            "none": "Use continuous prose with no internal section headings; organize with paragraphs and transitions only.",
+            "few": "Use at most one or two concise internal section headings, only when they genuinely help navigation.",
+            "standard": "Use two to four concise internal section headings when they improve navigation.",
+            "detailed": "Use clear internal section headings for the major steps of the argument, usually four to six.",
+        }
+        unit_article = "an" if self.unit_label[:1].lower() in "aeiou" else "a"
+        part_article = "an" if self.part_label[:1].lower() in "aeiou" else "a"
+        structure = (
+            f"Book structure: call each major division {unit_article} {self.unit_label}; "
+            f"call each grouping {part_article} {self.part_label}. "
+            f"{heading_rules.get(self.subheading_style, heading_rules['standard'])}"
+        )
+        return style_block(self.clean_directives(), self.extra_instructions, self.clean_banned()) + "\n\n" + structure
 
     def clean_directives(self) -> list[str]:
         """Drop unknown ids and de-duplicate, preserving order.
@@ -125,6 +152,10 @@ class BookSpec:
             "voice_sample": self.clean_voice_sample(),
             "pov": self.pov if self.pov in config.POVS else config.DEFAULT_POV,
             "review_outline": self.review_outline,
+            "unit_label": self.unit_label,
+            "part_label": self.part_label,
+            "subheading_style": self.subheading_style,
+            "group_count": self.group_count_override,
         }
 
 
@@ -628,6 +659,8 @@ async def _write_chapter(
         plan=plan, chapter=chapter, part_title=part_title, bible=bible, style=style,
         pov=spec.pov_text if spec else "",
         voice_sample=spec.clean_voice_sample() if spec else "",
+        unit_label=spec.unit_label if spec else "chapter",
+        part_label=spec.part_label if spec else "part",
     ):
         if job.cancelled:
             raise asyncio.CancelledError

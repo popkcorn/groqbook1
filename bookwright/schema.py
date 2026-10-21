@@ -219,8 +219,14 @@ def parse_plan(
 
 def plan_skeleton_hint(length) -> str:
     """Human-readable shape constraints handed to the architect."""
+    unit = getattr(length, "unit_label", "chapter")
+    group = getattr(length, "part_label", "part")
+    def plural(word: str) -> str:
+        return word[:-1] + "ies" if word.endswith("y") and word[-2:-1] not in "aeiou" else word + "s"
+    group_name = group if length.parts == 1 else plural(group)
+    unit_name = unit if length.chapters == 1 else plural(unit)
     return (
-        f"Exactly {length.parts} parts and {length.chapters} chapters total "
-        f"(roughly {max(1, round(length.chapters / length.parts))} per part). "
-        f"Each chapter is about {length.words_per_chapter} words."
+        f"Exactly {length.parts} {group_name} and {length.chapters} {unit_name} total "
+        f"(roughly {max(1, round(length.chapters / length.parts))} per {group}). "
+        f"Each {unit} is about {length.words_per_chapter:,} words."
     )
