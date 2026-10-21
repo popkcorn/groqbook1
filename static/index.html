@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookwright — write a book from a sentence</title>
+<meta name="description" content="A staged book-writing model: architect, writer, editor, composer.">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='25' font-size='26'>📖</text></svg>">
+</head>
+<body>
+<div class="progress-rail" id="rail" aria-hidden="true"><span></span></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">B</span>
+    <div>
+      <h1>Bookwright</h1>
+      <p>A staged model for short books</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="mode-badge" id="mode-badge" title="Which backend is writing">demo</span>
+    <button class="ghost" id="key-btn" type="button">API key</button>
+  </div>
+</header>
+
+<main class="shell">
+  <aside class="panel" id="panel">
+    <form id="brief" autocomplete="off">
+      <label class="field">
+        <span class="label">What is the book about?</span>
+        <textarea id="topic" rows="3" maxlength="240" required
+          placeholder="e.g. why cities keep building systems nobody can maintain"></textarea>
+        <span class="hint"><span id="topic-count">0</span>/240 · a subject, not a title</span>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span class="label">Reader</span>
+          <select id="audience"></select>
+        </label>
+        <label class="field">
+          <span class="label">Voice</span>
+          <select id="tone"></select>
+        </label>
+      </div>
+
+      <div class="field">
+        <span class="label">Length</span>
+        <div class="chips" id="lengths" role="radiogroup" aria-label="Length"></div>
+      </div>
+
+      <button class="primary" id="go" type="submit">
+        <span>Write the book</span>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <p class="estimate" id="estimate">No key needed in demo mode.</p>
+    </form>
+
+    <section class="run" id="run" hidden>
+      <div class="run-head">
+        <span class="pulse" aria-hidden="true"></span>
+        <p id="status" role="status" aria-live="polite">Ready</p>
+      </div>
+      <div class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
+      <dl class="stats">
+        <div><dt>Chapters</dt><dd id="s-chapters">0/0</dd></div>
+        <div><dt>Words written</dt><dd id="s-words">0</dd></div>
+        <div><dt>Tokens</dt><dd id="s-tokens">0</dd></div>
+        <div><dt>Throughput</dt><dd id="s-speed">—</dd></div>
+        <div><dt>Elapsed</dt><dd id="s-time">0s</dd></div>
+      </dl>
+      <div class="run-actions">
+        <button class="ghost" id="cancel" type="button" hidden>Stop</button>
+        <button class="ghost" id="again" type="button" hidden>New book</button>
+      </div>
+    </section>
+
+    <section class="toc" id="toc" hidden>
+      <h2>Contents</h2>
+      <ol id="toc-list"></ol>
+    </section>
+
+    <section class="export" id="export" hidden>
+      <h2>Export</h2>
+      <div class="export-grid" id="export-grid"></div>
+      <p class="hint" id="export-hint">Files build on demand from what has been written.</p>
+    </section>
+
+    <footer class="panel-foot">
+      <p>Architect plans · Writer drafts · Editor keeps continuity · Composer exports.</p>
+    </footer>
+  </aside>
+
+  <section class="reader" id="reader" aria-live="polite">
+    <div class="empty" id="empty">
+      <div class="empty-inner">
+        <p class="kicker">A book in one sentence</p>
+        <h2>Give it a subject.<br>Watch a book assemble itself.</h2>
+        <p class="lede">Bookwright stages the work the way an author does: one model designs the
+          argument, another writes each chapter against a running bible of what came before,
+          and a third keeps the book from contradicting itself. Then it typesets.</p>
+        <ul class="flow">
+          <li><b>01</b> Architect — parts, chapters, beats</li>
+          <li><b>02</b> Writer — chapters, streamed as they land</li>
+          <li><b>03</b> Editor — summaries + glossary for continuity</li>
+          <li><b>04</b> Composer — Markdown, HTML, EPUB, PDF</li>
+        </ul>
+        <p class="try">Try: <button class="link" data-topic="why cities keep building systems nobody can maintain">maintenance debt in cities</button> ·
+          <button class="link" data-topic="the quiet economics of second-hand markets">second-hand markets</button> ·
+          <button class="link" data-topic="how expertise turns into blindness">the cost of expertise</button></p>
+      </div>
+    </div>
+    <article class="book" id="book" hidden></article>
+  </section>
+</main>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="modal" id="key-modal" role="dialog" aria-modal="true" aria-labelledby="key-title" hidden>
+  <h2 id="key-title">Your Groq API key</h2>
+  <p class="modal-copy">Bookwright reads the key from the server environment
+    (<code>GROQ_API_KEY</code>) when it can. Paste one here to use your own quota — it is kept in
+    this tab's session storage only, sent per request, and never written to disk.</p>
+  <input id="key-input" type="password" placeholder="gsk_..." spellcheck="false" autocomplete="off">
+  <p class="hint" id="key-hint">Leave empty to stay in demo mode.</p>
+  <div class="modal-actions">
+    <button class="ghost" id="key-clear" type="button">Clear</button>
+    <button class="primary" id="key-save" type="button">Use this key</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="alert" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

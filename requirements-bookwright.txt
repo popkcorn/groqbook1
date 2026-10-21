@@ -1,0 +1,9 @@
+# Bookwright runtime. Only direct dependencies are listed (compare with the
+# 55-package transitive dump in requirements.txt, which belongs to the old app).
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+httpx>=0.27,<1
+reportlab>=4.2,<6
+pydantic>=2.7,<3
+
+# dev extras:  pip install -r requirements-bookwright.txt pytest pymupdf ruff
