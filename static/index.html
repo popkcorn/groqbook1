@@ -39,10 +39,12 @@
         <label class="field">
           <span class="label">Reader</span>
           <select id="audience"></select>
+          <span class="hint">Sets assumed background knowledge, explanation depth, and useful examples.</span>
         </label>
         <label class="field">
           <span class="label">Voice</span>
           <select id="tone"></select>
+          <span class="hint" id="tone-hint"></span>
         </label>
       </div>
 
@@ -142,6 +144,67 @@
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <p class="estimate" id="estimate">No key needed in demo mode.</p>
+
+      <details class="option-guide">
+        <summary>What does each option change?</summary>
+        <div class="guide-section">
+          <h3>Writing the book</h3>
+          <dl>
+            <dt>Subject</dt>
+            <dd>Gives the architect the topic to argue and organize around; enter a subject, not a finished title.</dd>
+            <dt>Reader</dt>
+            <dd>Sets assumed background knowledge, explanation depth, and useful examples. General readers get more foundations; practitioners get applied detail; students get concepts explained; executives get decision-focused framing; specialists get deeper technical language.</dd>
+            <dt>Voice</dt>
+            <dd>Sets the prose tone—such as plain, narrative, rigorous, or playful—and influences both the outline and chapters.</dd>
+            <dt>Length</dt>
+            <dd>Sets chapter count and target words per chapter. Longer books request more model output and take longer; Custom lets you choose both values.</dd>
+            <dt>Facts, notes and sources</dt>
+            <dd>Supplies grounding material for planning and every chapter. The model is asked to use it rather than invent specifics, but it is not a fact-checker.</dd>
+            <dt>Voice sample</dt>
+            <dd>Guides cadence and diction only. The sample's wording and facts are not meant to be reused.</dd>
+            <dt>Point of view</dt>
+            <dd>Chooses the narrative perspective (I, we, you, third person, or automatic); conflicting style rules are switched off.</dd>
+            <dt>Editorial profile</dt>
+            <dd>Applies a bundle of style switches, editing intensity, and house-style instructions. You can adjust each one afterwards; the available profiles are:
+              <div class="guide-profile-list" id="guide-profiles"></div>
+            </dd>
+            <dt>Style switches</dt>
+            <dd>Tell the writer what to avoid and enable matching checks in the editorial pass. Each switch's description names the pattern it targets.</dd>
+            <dt>Editorial de-AI pass</dt>
+            <dd>When on, scans finished chapters and selectively rewrites flagged passages. This can change prose, and adds model calls and time.</dd>
+            <dt>Intensity</dt>
+            <dd>Controls when the editor runs: Gentle at 5+ flags, Standard at 2+, or Aggressive for any flag. Higher intensity can edit more passages.</dd>
+            <dt>Banned words and phrases</dt>
+            <dd>Lists terms the writer is told to avoid; the editor also checks for them in the draft.</dd>
+            <dt>House style</dt>
+            <dd>Adds your own short instructions to every chapter prompt—for example, spelling, paragraph length, or naming preferences.</dd>
+            <dt>Review the outline</dt>
+            <dd>Pauses after planning so you can edit the title, chapters, purposes, and beats before drafting. Turn it off to start writing automatically.</dd>
+            <dt>API key / mode</dt>
+            <dd>A Groq key enables live model output. Without a key, demo mode uses fixed sample prose and does not generate custom content.</dd>
+          </dl>
+        </div>
+        <div class="guide-section">
+          <h3>Export layout</h3>
+          <dl>
+            <dt>File format</dt>
+            <dd>Markdown is easy to edit, HTML is for browsers and printing, EPUB is for e-readers, and PDF preserves a fixed page layout.</dd>
+            <dt>Page size and margins</dt>
+            <dd>Set the page dimensions and printable area; they change layout and page count, not the prose.</dd>
+            <dt>Chapter heading</dt>
+            <dd>Chooses whether exports label chapters as “Chapter 1”, “1.”, or with the title only.</dd>
+            <dt>Body size and line spacing</dt>
+            <dd>Change the type size and vertical breathing room, affecting readability and pagination.</dd>
+            <dt>Paragraphs and alignment</dt>
+            <dd>Choose first-line indents or paragraph gaps, then left alignment or justified text.</dd>
+            <dt>New page per chapter</dt>
+            <dd>Starts each chapter on a fresh page in PDF and print-ready HTML.</dd>
+            <dt>PDF running matter</dt>
+            <dd>Adds running headers and page numbers to PDF exports; it does not affect EPUB or Markdown.</dd>
+          </dl>
+        </div>
+        <p class="guide-foot">Export settings affect presentation only. Page pagination is controlled by the reader in EPUB; Markdown uses the chapter-heading choice.</p>
+      </details>
     </form>
 
     <section class="run" id="run" hidden>

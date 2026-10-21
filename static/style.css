@@ -589,3 +589,33 @@ textarea:focus, select:focus, input:focus {
 .chapter-tool-actions button:disabled { opacity: .55; cursor: wait; }
 .chapter-tool-actions .undo-regen-btn[hidden] { display: none; }
 .regen-note { margin: .45rem 0 0; color: var(--muted); font-size: .66rem; line-height: 1.4; }
+
+/* --------------------------------------------------------------- option guide */
+.option-guide {
+  margin-top: .9rem; border-top: 1px solid var(--rule); padding-top: .65rem;
+}
+.option-guide > summary {
+  cursor: pointer; color: var(--ink-soft); font-size: .76rem; font-weight: 600;
+}
+.guide-section { margin-top: .7rem; }
+.guide-section + .guide-section {
+  margin-top: .85rem; padding-top: .75rem; border-top: 1px solid var(--rule);
+}
+.guide-section h3 {
+  margin: 0 0 .45rem; color: var(--muted); font-size: .62rem;
+  letter-spacing: .12em; text-transform: uppercase;
+}
+.guide-section dl { margin: 0; }
+.guide-section dt {
+  margin-top: .52rem; color: var(--ink-soft); font-size: .69rem; font-weight: 650;
+}
+.guide-section dt:first-child { margin-top: 0; }
+.guide-section dd {
+  margin: .08rem 0 0; color: var(--muted); font-size: .67rem; line-height: 1.45;
+}
+.guide-foot {
+  margin: .7rem 0 0; padding-top: .55rem; border-top: 1px solid var(--rule);
+  color: var(--muted); font-size: .65rem; line-height: 1.45;
+}
+.guide-profile { margin: .28rem 0 0; color: var(--muted); font-size: .65rem; line-height: 1.4; }
+.guide-profile strong { color: var(--ink-soft); font-weight: 650; }

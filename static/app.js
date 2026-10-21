@@ -189,6 +189,12 @@
     const tone = $("#tone");
     presets.tones.forEach((t) => tone.add(new Option(t.id[0].toUpperCase() + t.id.slice(1), t.id)));
     tone.value = presets.defaults.tone;
+    const toneHint = $("#tone-hint");
+    const updateToneHint = () => {
+      toneHint.textContent = presets.tones.find((item) => item.id === tone.value)?.description || "";
+    };
+    tone.addEventListener("change", updateToneHint);
+    updateToneHint();
 
     const chips = $("#lengths");
     presets.lengths.forEach((preset) => {
@@ -246,6 +252,9 @@
         applyProfile(profile, presets);
       });
       profiles.append(chip);
+      const guideLine = el("p", "guide-profile");
+      guideLine.append(el("strong", "", profile.label), document.createTextNode(` — ${profile.description}`));
+      $("#guide-profiles").append(guideLine);
     });
     setProfile(presets.default_profile || "custom");
     // Any hand-edit of the switches/strength means the profile no longer applies.
@@ -363,9 +372,10 @@
       state.directives = inputs.filter((i) => i.checked).map((i) => i.value);
       paintStyleCount();
     }
+    const povDescription = state.presets?.pov.options.find((option) => option.id === $("#pov").value)?.description;
     $("#pov-hint").textContent = blocked
       ? `“${blocked === "no_first_person" ? "No I" : "No you"}” is switched off — it contradicts this point of view.`
-      : "A rule that contradicts this is switched off rather than half-applied.";
+      : povDescription || "A rule that contradicts this is switched off rather than half-applied.";
   }
 
   function currentLength(presets) {
