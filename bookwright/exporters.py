@@ -91,7 +91,7 @@ class ExportOptions:
 PAGE_SIZES = {"a5": "A5", "a4": "A4", "letter": "Letter"}
 # Horizontal, top, bottom in millimetres.
 PAGE_MARGINS = {"narrow": (12, 14, 15), "normal": (17, 19, 20), "wide": (25, 25, 25)}
-CHAPTER_HEADINGS = {"chapter", "number", "title"}
+CHAPTER_HEADINGS = {"chapter", "number", "title", "none"}
 UNIT_LABELS = {"chapter", "section", "essay", "entry"}
 PART_LABELS = {"part", "book", "volume"}
 FONT_SIZES = {9, 10, 11, 12, 13, 14}
@@ -348,11 +348,12 @@ def to_markdown(
         if part.summary:
             lines += [f"*{part.summary}*", ""]
         for chapter in part.chapters:
-            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
-            if marker and options.chapter_heading == "chapter":
-                marker += "."
-            heading = f"{marker} {chapter.title}".strip()
-            lines += [f"### {heading}", ""]
+            if options.chapter_heading != "none":
+                marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
+                if marker and options.chapter_heading == "chapter":
+                    marker += "."
+                heading = f"{marker} {chapter.title}".strip()
+                lines += [f"### {heading}", ""]
             lines += [(chapters.get(chapter.index, {}).get("text") or "").strip(), ""]
     stamp = datetime.now(UTC).strftime("%d %B %Y")
     imprint = _end_imprint(options, stamp=stamp, title=title, subtitle=subtitle)
@@ -470,11 +471,14 @@ def to_html(
             marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
             page_class = " page-break" if options.chapter_new_page else ""
             label = f'<div class="ch-num">{html.escape(marker)}</div>' if marker else ""
-            body.append(
-                f'<article class="chapter{page_class}" id="ch-{chapter.index}">'
+            heading_html = (
                 f'<header class="ch-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">{label}'
                 f"<h2>{html.escape(chapter.title)}</h2></header>"
-                f"{blocks_to_html(parse_markdown(text))}</article>"
+                if options.chapter_heading != "none" else ""
+            )
+            body.append(
+                f'<article class="chapter{page_class}" id="ch-{chapter.index}">'
+                f"{heading_html}{blocks_to_html(parse_markdown(text))}</article>"
             )
 
     cover_html = ""
@@ -588,9 +592,13 @@ def to_epub(
             marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
             break_class = " chapter-break" if options.chapter_new_page else ""
             label = f'<p class="chapter-num">{html.escape(marker)}</p>' if marker else ""
-            body = (
-                f'<section class="chapter{break_class}"><header class="chapter-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">{label}'
+            heading_html = (
+                f'<header class="chapter-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">{label}'
                 f"<h1>{html.escape(chapter.title)}</h1></header>"
+                if options.chapter_heading != "none" else ""
+            )
+            body = (
+                f'<section class="chapter{break_class}">{heading_html}'
                 f"{blocks_to_html(parse_markdown(text))}</section>"
             )
             ch_name = f"ch{chapter.index:02d}.xhtml"
@@ -676,12 +684,13 @@ def to_epub(
             ".part-title { min-height:80vh; display:flex; flex-direction:column; }\n"
         )
         if options.chapter_new_page:
-            epub_css += (
-                "\n.chapter-break { break-before: page; page-break-before: always; }\n"
-                ".chapter-head.position-middle { padding-top:28vh; }\n"
-                ".chapter-head.position-bottom { padding-top:48vh; }\n"
-            )
-        if options.chapter_heading != "title":
+            epub_css += "\n.chapter-break { break-before: page; page-break-before: always; }\n"
+            if options.chapter_heading != "none":
+                epub_css += (
+                    ".chapter-head.position-middle { padding-top:28vh; }\n"
+                    ".chapter-head.position-bottom { padding-top:48vh; }\n"
+                )
+        if options.chapter_heading in {"chapter", "number"}:
             epub_css += ".chapter-num { font-family: sans-serif; font-size: .75em; text-indent: 0; }\n"
         zf.writestr("OEBPS/style.css", epub_css, compress_type=zipfile.ZIP_DEFLATED)
         for _, filename, xhtml in docs:
@@ -968,13 +977,14 @@ def to_pdf(
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
             marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
-            if options.chapter_new_page:
-                offset = _position_fraction(options.chapter_position, top=0.0, middle=0.25, bottom=0.40) * (page_h - margin_top - margin_bottom)
-                if offset:
-                    story.append(Spacer(1, offset))
-            if marker:
-                story.append(Paragraph(html.escape(marker.upper()), styles["chapter_label"]))
-            story.append(Paragraph(html.escape(chapter.title), styles["chapter_title"]))
+            if options.chapter_heading != "none":
+                if options.chapter_new_page:
+                    offset = _position_fraction(options.chapter_position, top=0.0, middle=0.25, bottom=0.40) * (page_h - margin_top - margin_bottom)
+                    if offset:
+                        story.append(Spacer(1, offset))
+                if marker:
+                    story.append(Paragraph(html.escape(marker.upper()), styles["chapter_label"]))
+                story.append(Paragraph(html.escape(chapter.title), styles["chapter_title"]))
             first_para = True
             for block in parse_markdown(text):
                 if block.type == "h":

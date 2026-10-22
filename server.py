@@ -547,7 +547,7 @@ async def export_book(
     fmt: str,
     page_size: Literal["a5", "a4", "letter"] = "a5",
     margins: Literal["narrow", "normal", "wide"] = "normal",
-    chapter_heading: Literal["chapter", "number", "title"] = "chapter",
+    chapter_heading: Literal["chapter", "number", "title", "none"] = "chapter",
     body_font_size: int = Query(default=10, ge=9, le=14),
     line_spacing: Literal["compact", "normal", "airy"] = "normal",
     paragraph_style: Literal["indent", "space"] = "indent",

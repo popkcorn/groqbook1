@@ -698,6 +698,35 @@ def test_structure_choices_reach_planning_and_writing_prompts():
     assert "# Essay 1:" in writing[1]["content"]
 
 
+def test_no_division_heading_hides_title_and_number_but_keeps_prose(finished):
+    plan, chapters = finished
+    options = ExportOptions(chapter_heading="none")
+    first_title = plan.chapters[0].title
+
+    markdown = to_markdown(plan, chapters, options=options)
+    assert f"### {first_title}" not in markdown
+    assert chapters[1]["text"].split()[0] in markdown
+
+    html_output = to_html(plan, chapters, options=options)
+    first_article = html_output.split('id="ch-1"', 1)[1].split("</article>", 1)[0]
+    assert "ch-head" not in first_article and "<h2>" not in first_article
+    assert "Contents" in html_output and first_title in html_output
+
+    epub = to_epub(plan, chapters, options=options)
+    with zipfile.ZipFile(io.BytesIO(epub)) as archive:
+        first_chapter = archive.read("OEBPS/ch01.xhtml").decode()
+        assert "chapter-head" not in first_chapter and "<h1>" not in first_chapter
+        assert first_title in archive.read("OEBPS/nav.xhtml").decode()
+
+    pymupdf = pytest.importorskip("pymupdf")
+    pdf, _, _ = export(plan, chapters, "pdf", options=options)
+    pdf_text = "\n".join(page.get_text() for page in pymupdf.open(stream=pdf, filetype="pdf"))
+    source_occurrences = sum(state["text"].count(first_title) for state in chapters.values())
+    assert pdf_text.count(first_title) <= source_occurrences
+    with pytest.raises(ValueError, match="chapter_heading"):
+        ExportOptions(chapter_heading="invisible")
+
+
 def test_export_structure_title_page_subtitle_and_custom_metadata(finished):
     plan, chapters = finished
     options = ExportOptions(
@@ -775,7 +804,17 @@ def test_export_api_forwards_structure_and_title_overrides(finished, monkeypatch
     assert 'class="cover position-middle" style="text-align:center;justify-content:center"' in positioned.text
     assert 'class="part-title position-bottom"' in positioned.text
     assert 'class="ch-head position-middle" style="text-align:center"' in positioned.text
+    first_article = positioned.text.split('id="ch-1"', 1)[1].split("</article>", 1)[0]
+    assert "ch-head" in first_article
     assert f"Printed for {plan.title}" in positioned.text
+
+    no_heading = TestClient(server.app).get(
+        f"/api/books/{job.id}/export/html",
+        params={"chapter_heading": "none"},
+    )
+    assert no_heading.status_code == 200
+    no_heading_article = no_heading.text.split('id="ch-1"', 1)[1].split("</article>", 1)[0]
+    assert "ch-head" not in no_heading_article
 
 
 def test_cover_positioning_and_custom_end_imprint_across_formats(finished):
