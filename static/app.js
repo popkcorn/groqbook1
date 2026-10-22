@@ -984,8 +984,10 @@
     state.plan = plan;
     $("#exp-unit-label").value = state.unitLabel;
     $("#exp-part-label").value = state.partLabel;
-    $("#exp-title").placeholder = plan.title || "Use outline title";
-    $("#exp-subtitle").placeholder = plan.subtitle || "Use outline subtitle";
+    $("#exp-title").value = plan.title || "";
+    $("#exp-subtitle").value = plan.subtitle || "";
+    $("#exp-title").placeholder = plan.title || "Book title";
+    $("#exp-subtitle").placeholder = plan.subtitle || "Subtitle (optional)";
     $("#empty").hidden = true;
     const book = $("#book");
     book.hidden = false;
@@ -1536,6 +1538,14 @@
             subtitle: $("#exp-subtitle").value.trim(),
             show_title_page: String($("#exp-title-page").checked),
             show_subtitle: String($("#exp-subtitle-visible").checked),
+            cover_kicker: $("#exp-cover-kicker").value,
+            cover_alignment: $("#exp-cover-align").value,
+            cover_position: $("#exp-cover-position").value,
+            part_alignment: $("#exp-part-align").value,
+            part_position: $("#exp-part-position").value,
+            chapter_alignment: $("#exp-chapter-align").value,
+            chapter_position: $("#exp-chapter-position").value,
+            end_imprint: $("#exp-end-imprint").value,
             header_left: $("#exp-header-left").value.trim(),
             header_right: $("#exp-header-right").value.trim(),
           });

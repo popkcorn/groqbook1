@@ -433,21 +433,27 @@ curl -OJ localhost:8000/api/books/<id>/export/pdf
 
 ### Export layout controls
 
-After a book has text, the Export panel lets you set the division/group labels,
-heading format (`Chapter 1`, `1.`, or title only), exported title and subtitle,
-and whether to include a title page or subtitle. PDF running-header text (left
-and right) and page numbers are controlled independently. Layout controls include
-page size (A5, A4, Letter), margins, body font size (9–14 pt), line spacing,
-paragraph indents versus spacing, alignment, and a page break per major division.
-These presentation settings do not change the generated prose. Page size and
-pagination apply to PDF and print-ready HTML. EPUB readers control pagination;
-EPUB honors typography and heading choices. Markdown uses the selected division
-heading style and includes the exported title.
+After a book has text, the Export panel lets you edit the actual exported title,
+subtitle, and cover line/byline (for example, `BOOKWRIGHT`), and choose whether
+the title page or subtitle appears. Set alignment (left/center/right) and vertical
+position (top/middle/bottom) independently for the cover, group openers, and
+division headings. Division vertical placement applies when each division starts
+on a new page. Vertical placement is most reliable in PDF and print HTML; EPUB
+readers may adapt it. Edit the end imprint or clear it entirely; its
+`{date}`, `{title}`, `{subtitle}`, `{unit}`, and `{group}` tokens are filled at
+export time. These changes do not rewrite the saved outline or prose.
+
+The panel also includes division/group labels, heading format (`Chapter 1`, `1.`,
+or title only), page size, margins, body font size (9–14 pt), line spacing,
+paragraph indents versus spacing, body alignment, and a page break per major
+division. PDF running-header text (left and right) and page numbers are controlled
+independently. EPUB readers control pagination; Markdown keeps the heading structure
+and appends the imprint text.
 
 The settings are also available as query parameters, for example:
 
 ```text
-/api/books/<id>/export/pdf?page_size=letter&margins=wide&chapter_heading=number&unit_label=essay&part_label=book&title=Sample&subtitle=An%20overview&body_font_size=12&line_spacing=airy&paragraph_style=space&alignment=left&chapter_new_page=false&running_matter=true&page_numbers=false&header_left=Sample&header_right=AUTHOR&show_title_page=false&show_subtitle=false
+/api/books/<id>/export/pdf?page_size=letter&margins=wide&chapter_heading=number&unit_label=essay&part_label=book&title=Sample&subtitle=An%20overview&cover_kicker=BOOKWRIGHT&cover_alignment=center&cover_position=middle&part_alignment=center&part_position=middle&chapter_alignment=left&chapter_position=top&end_imprint=Copyright%20by%20Author%20%7Bdate%7D&body_font_size=12&line_spacing=airy&paragraph_style=space&alignment=left&chapter_new_page=true&running_matter=true&page_numbers=false&header_left=Sample&header_right=AUTHOR&show_title_page=true&show_subtitle=true
 ```
 
 For grounded or reviewed books, `POST /api/books` also accepts `notes`,

@@ -562,6 +562,9 @@ textarea:focus, select:focus, input:focus {
 .export-controls input, .export-controls select {
   width: 100%; max-width: 100%; min-width: 0; font-size: .72rem;
 }
+.export-imprint { display: flex; flex-direction: column; gap: .25rem; margin-top: .65rem; }
+.export-imprint textarea { width: 100%; resize: vertical; font: inherit; font-size: .72rem; }
+.export-imprint small { color: var(--muted); font-size: .66rem; }
 .export-checks {
   display: grid; gap: .35rem; margin-top: .7rem;
   color: var(--ink-soft); font-size: .72rem;

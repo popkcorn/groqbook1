@@ -762,6 +762,77 @@ def test_export_api_forwards_structure_and_title_overrides(finished, monkeypatch
     assert 'class="cover"' not in content and "Export subtitle" not in content
     assert "Book 1" in content and "Essay 1" in content
 
+    positioned = TestClient(server.app).get(
+        f"/api/books/{job.id}/export/html",
+        params={
+            "cover_kicker": "BOOKWRIGHT", "cover_alignment": "center",
+            "cover_position": "middle", "part_alignment": "right",
+            "part_position": "bottom", "chapter_alignment": "center",
+            "chapter_position": "middle", "end_imprint": "Printed for {title}",
+        },
+    )
+    assert positioned.status_code == 200
+    assert 'class="cover position-middle" style="text-align:center;justify-content:center"' in positioned.text
+    assert 'class="part-title position-bottom"' in positioned.text
+    assert 'class="ch-head position-middle" style="text-align:center"' in positioned.text
+    assert f"Printed for {plan.title}" in positioned.text
+
+
+def test_cover_positioning_and_custom_end_imprint_across_formats(finished):
+    pymupdf = pytest.importorskip("pymupdf")
+    plan, chapters = finished
+    options = ExportOptions(
+        title_override="Custom Cover Title", subtitle_override="Edited subtitle",
+        cover_kicker="BOOKWRIGHT", cover_alignment="center", cover_position="middle",
+        part_alignment="right", part_position="bottom",
+        chapter_alignment="center", chapter_position="middle",
+        end_imprint="Imprint: {title} | {subtitle} | {date} | {unit} | {group}",
+    )
+    markdown = to_markdown(plan, chapters, options=options)
+    assert "# Custom Cover Title" in markdown and "*Edited subtitle*" in markdown
+    assert "Imprint: Custom Cover Title | Edited subtitle | " in markdown
+    assert " | chapter | part" in markdown and "{date}" not in markdown
+
+    html_output = to_html(plan, chapters, options=options)
+    assert 'class="cover position-middle" style="text-align:center;justify-content:center"' in html_output
+    assert 'class="part-title position-bottom"' in html_output
+    assert 'class="ch-head position-middle" style="text-align:center"' in html_output
+    assert "Imprint: Custom Cover Title | Edited subtitle | " in html_output
+
+    epub = to_epub(plan, chapters, options=options)
+    with zipfile.ZipFile(io.BytesIO(epub)) as archive:
+        names = archive.namelist()
+        assert "OEBPS/colophon.xhtml" in names
+        part = archive.read("OEBPS/part1.xhtml").decode()
+        chapter = archive.read("OEBPS/ch01.xhtml").decode()
+        css = archive.read("OEBPS/style.css").decode()
+        imprint = archive.read("OEBPS/colophon.xhtml").decode()
+        assert 'position-bottom' in part and 'position-middle' in chapter
+        assert ".chapter-head { text-align: center; }" in css
+        assert "Imprint: Custom Cover Title | Edited subtitle | " in imprint
+
+    pdf, _, _ = export(plan, chapters, "pdf", options=options)
+    pdf_text = "\n".join(page.get_text() for page in pymupdf.open(stream=pdf, filetype="pdf"))
+    assert "Custom Cover Title" in pdf_text and "BOOKWRIGHT" in pdf_text
+    assert "Imprint: Custom Cover Title | Edited subtitle | " in pdf_text
+
+
+def test_empty_end_imprint_and_cover_line_are_respected(finished):
+    plan, chapters = finished
+    options = ExportOptions(end_imprint="", cover_kicker="", show_title_page=False)
+    assert "Generated on " not in to_markdown(plan, chapters, options=options)
+    html_output = to_html(plan, chapters, options=options)
+    assert "class=\"colophon\"" not in html_output
+    assert "class=\"cover" not in html_output
+    epub = to_epub(plan, chapters, options=options)
+    with zipfile.ZipFile(io.BytesIO(epub)) as archive:
+        assert "OEBPS/colophon.xhtml" not in archive.namelist()
+        assert "OEBPS/title.xhtml" not in archive.namelist()
+    pdf, _, _ = export(plan, chapters, "pdf", options=options)
+    pymupdf = pytest.importorskip("pymupdf")
+    pdf_text = "\n".join(page.get_text() for page in pymupdf.open(stream=pdf, filetype="pdf"))
+    assert "Generated on " not in pdf_text and "A BOOK WRITTEN WITH BOOKWRIGHT" not in pdf_text
+
 
 def test_pdf_running_header_and_page_numbers_are_independent(finished):
     pymupdf = pytest.importorskip("pymupdf")

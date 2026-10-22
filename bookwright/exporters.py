@@ -36,10 +36,18 @@ class ExportOptions:
     page_numbers: bool = True
     unit_label: str = "chapter"
     part_label: str = "part"
-    title_override: str = ""
-    subtitle_override: str = ""
+    title_override: str | None = None
+    subtitle_override: str | None = None
     show_title_page: bool = True
     show_subtitle: bool = True
+    cover_kicker: str | None = None
+    cover_alignment: str = "left"
+    cover_position: str = "top"
+    part_alignment: str = "left"
+    part_position: str = "top"
+    chapter_alignment: str = "left"
+    chapter_position: str = "top"
+    end_imprint: str | None = None
     header_left: str = ""
     header_right: str = "BOOKWRIGHT"
 
@@ -48,8 +56,20 @@ class ExportOptions:
             raise ValueError(f"unit_label must be one of {sorted(UNIT_LABELS)}")
         if self.part_label not in PART_LABELS:
             raise ValueError(f"part_label must be one of {sorted(PART_LABELS)}")
-        if len(self.title_override) > 120 or len(self.subtitle_override) > 180:
-            raise ValueError("title/subtitle override is too long")
+        if self.title_override is not None and len(self.title_override) > 120:
+            raise ValueError("title override is too long")
+        if self.subtitle_override is not None and len(self.subtitle_override) > 180:
+            raise ValueError("subtitle override is too long")
+        if self.cover_kicker is not None and len(self.cover_kicker) > 120:
+            raise ValueError("cover line is too long")
+        if self.end_imprint is not None and len(self.end_imprint) > 1500:
+            raise ValueError("end imprint is too long")
+        for field_name in ("cover_alignment", "part_alignment", "chapter_alignment"):
+            if getattr(self, field_name) not in TEXT_ALIGNMENTS:
+                raise ValueError(f"{field_name} must be one of {sorted(TEXT_ALIGNMENTS)}")
+        for field_name in ("cover_position", "part_position", "chapter_position"):
+            if getattr(self, field_name) not in TEXT_POSITIONS:
+                raise ValueError(f"{field_name} must be one of {sorted(TEXT_POSITIONS)}")
         if len(self.header_left) > 80 or len(self.header_right) > 80:
             raise ValueError("PDF header text must be 80 characters or fewer")
         if self.page_size not in PAGE_SIZES:
@@ -78,6 +98,15 @@ FONT_SIZES = {9, 10, 11, 12, 13, 14}
 LINE_SPACING = {"compact": 1.3, "normal": 1.5, "airy": 1.8}
 PARAGRAPH_STYLES = {"indent", "space"}
 ALIGNMENTS = {"justify", "left"}
+TEXT_ALIGNMENTS = {"left", "center", "right"}
+TEXT_POSITIONS = {"top", "middle", "bottom"}
+DEFAULT_COVER_KICKER = "A BOOK WRITTEN WITH BOOKWRIGHT"
+DEFAULT_END_IMPRINT = (
+    "Generated on {date} by Bookwright: an architect model planned the book, "
+    "a writer model drafted each {unit} against a running continuity bible, "
+    "and an editor model summarised what had been written. Text is model output; "
+    "verify any claim before relying on it."
+)
 DEFAULT_EXPORT_OPTIONS = ExportOptions()
 
 # Models sometimes use Unicode hyphens that older fonts and ebook/PDF readers
@@ -129,11 +158,35 @@ def _chapter_marker(index: int, style: str, unit_label: str = "chapter") -> str:
 
 
 def _display_title(plan: Plan, options: ExportOptions) -> str:
-    return (options.title_override.strip() or plan.title).translate(EXPORT_HYPHENS)
+    override = options.title_override.strip() if options.title_override else ""
+    return (override or plan.title).translate(EXPORT_HYPHENS)
 
 
 def _display_subtitle(plan: Plan, options: ExportOptions) -> str:
-    return (options.subtitle_override.strip() or plan.subtitle).translate(EXPORT_HYPHENS)
+    value = plan.subtitle if options.subtitle_override is None else options.subtitle_override.strip()
+    return value.translate(EXPORT_HYPHENS)
+
+
+def _end_imprint(options: ExportOptions, *, stamp: str, title: str, subtitle: str) -> str:
+    template = DEFAULT_END_IMPRINT if options.end_imprint is None else options.end_imprint
+    replacements = {
+        "{date}": stamp,
+        "{title}": title,
+        "{subtitle}": subtitle,
+        "{unit}": options.unit_label,
+        "{group}": options.part_label,
+    }
+    for token, value in replacements.items():
+        template = template.replace(token, value)
+    return template.translate(EXPORT_HYPHENS).strip()
+
+
+def _position_fraction(position: str, *, top: float, middle: float, bottom: float) -> float:
+    return {"top": top, "middle": middle, "bottom": bottom}[position]
+
+
+def _position_css(position: str) -> str:
+    return {"top": "flex-start", "middle": "center", "bottom": "flex-end"}[position]
 
 
 FONT_DIRS = [
@@ -301,6 +354,10 @@ def to_markdown(
             heading = f"{marker} {chapter.title}".strip()
             lines += [f"### {heading}", ""]
             lines += [(chapters.get(chapter.index, {}).get("text") or "").strip(), ""]
+    stamp = datetime.now(UTC).strftime("%d %B %Y")
+    imprint = _end_imprint(options, stamp=stamp, title=title, subtitle=subtitle)
+    if imprint:
+        lines += ["---", "", imprint, ""]
     return "\n".join(lines).strip() + "\n"
 
 
@@ -312,14 +369,16 @@ body { margin:0; color:var(--ink); background:var(--paper);
   font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
   font-size:var(--body-size,10pt); line-height:var(--line-spacing,1.5); text-rendering:optimizeLegibility; }
 .page { max-width:34em; margin:0 auto; padding:4rem 2.2rem 6rem; }
-.cover { min-height:80vh; display:flex; flex-direction:column; justify-content:center;
+.cover { min-height:80vh; display:flex; flex-direction:column;
   page-break-after:always; break-after:page; }
 .cover .kicker { font-family:ui-sans-serif,system-ui,sans-serif; font-size:.7rem;
-  letter-spacing:.22em; text-transform:uppercase; color:var(--muted); margin-bottom:2.5rem; }
+  letter-spacing:.22em; color:var(--muted); margin-bottom:2.5rem; }
 .cover h1 { font-size:2.9rem; line-height:1.08; margin:0 0 1rem; font-weight:600;
   letter-spacing:-.01em; }
 .cover .sub { font-size:1.15rem; color:var(--muted); font-style:italic; margin:0 0 3rem; }
 .cover .rule { width:4rem; height:2px; background:var(--ink); margin:0 0 1.4rem; }
+.cover .rule.align-center { margin-left:auto; margin-right:auto; }
+.cover .rule.align-right { margin-left:auto; margin-right:0; }
 .cover .meta { font-family:ui-sans-serif,system-ui,sans-serif; font-size:.72rem;
   letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
 .cover .thesis { margin-top:3rem; font-size:.95rem; color:var(--muted); max-width:26em; }
@@ -333,11 +392,15 @@ body { margin:0; color:var(--ink); background:var(--paper);
 .toc a { color:inherit; text-decoration:none; }
 .toc .ch { display:flex; justify-content:space-between; gap:1rem; color:var(--ink); }
 .toc .ch span:first-child { color:var(--muted); font-variant-numeric:tabular-nums; padding-right:.5rem; }
-.part-title { page-break-before:always; break-before:page; padding-top:22vh; }
+.part-title { page-break-before:always; break-before:page; display:flex; flex-direction:column;
+  min-height:80vh; }
+.part-title.position-top { padding-top:22vh; }
 .part-title h3 { font-size:1.9rem; margin:0 0 .8rem; font-weight:600; }
 .part-title p { color:var(--muted); font-style:italic; max-width:24em; }
 .chapter.page-break { page-break-before:always; break-before:page; }
 .chapter .ch-head { margin-bottom:2rem; }
+.chapter.page-break .ch-head.position-middle { padding-top:28vh; }
+.chapter.page-break .ch-head.position-bottom { padding-top:48vh; }
 .chapter .ch-num { font-family:ui-sans-serif,system-ui,sans-serif; font-size:.7rem;
   letter-spacing:.2em; text-transform:uppercase; color:var(--muted); }
 .chapter h2 { font-size:1.75rem; line-height:1.2; margin:.4rem 0 0; font-weight:600; }
@@ -397,7 +460,7 @@ def to_html(
     body: list[str] = []
     for part in plan.parts:
         body.append(
-            f'<section class="part-title" id="part-{part.index}"><h2>{options.part_label.title()} {part.index}</h2>'
+            f'<section class="part-title position-{options.part_position}" id="part-{part.index}" style="text-align:{options.part_alignment};justify-content:{_position_css(options.part_position)}"><h2>{options.part_label.title()} {part.index}</h2>'
             f"<h3>{html.escape(part.title)}</h3>"
             + (f"<p>{html.escape(part.summary)}</p>" if part.summary else "")
             + "</section>"
@@ -409,16 +472,21 @@ def to_html(
             label = f'<div class="ch-num">{html.escape(marker)}</div>' if marker else ""
             body.append(
                 f'<article class="chapter{page_class}" id="ch-{chapter.index}">'
-                f'<header class="ch-head">{label}'
+                f'<header class="ch-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">{label}'
                 f"<h2>{html.escape(chapter.title)}</h2></header>"
                 f"{blocks_to_html(parse_markdown(text))}</article>"
             )
 
     cover_html = ""
     if options.show_title_page:
+        cover_kicker = DEFAULT_COVER_KICKER if options.cover_kicker is None else options.cover_kicker
         cover_parts = [
-            '<section class="cover"><div class="kicker">A book written with Bookwright</div>',
-            '<div class="rule"></div>',
+            f'<section class="cover position-{options.cover_position}" style="text-align:{options.cover_alignment};justify-content:{_position_css(options.cover_position)}">',
+        ]
+        if cover_kicker.strip():
+            cover_parts.append(f'<div class="kicker">{html.escape(cover_kicker.strip())}</div>')
+        cover_parts += [
+            f'<div class="rule align-{options.cover_alignment}"></div>',
             f"<h1>{html.escape(title)}</h1>",
         ]
         if options.show_subtitle and subtitle:
@@ -432,6 +500,12 @@ def to_html(
         cover_parts.append("</section>")
         cover_html = "".join(cover_parts)
 
+    imprint = _end_imprint(options, stamp=stamp, title=title, subtitle=subtitle)
+    imprint_html = (
+        f'<section class="colophon"><p>{html.escape(imprint).replace(chr(10), "<br>")}</p></section>'
+        if imprint else ""
+    )
+
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -441,9 +515,7 @@ def to_html(
 {cover_html}
 {''.join(toc)}
 {''.join(body)}
-<section class="colophon"><p>Set in DejaVu Serif. Generated {stamp} from a plan by
-Bookwright's architect stage. Everything in this book is model output and should be
-read as such.</p></section>
+{imprint_html}
 </div></body></html>"""
 
 
@@ -459,11 +531,15 @@ p.first, h1 + p, h2 + p { text-indent: 0; }
 blockquote { margin: 1.2em 1.4em; font-style: italic; color: #555; }
 ul { margin: 1em 0; }
 li { margin: .35em 0; }
-.title { text-align: center; margin-top: 30%; }
+.title { margin-top: 0; min-height: 80vh; display: flex; flex-direction: column; }
 .title h1 { font-size: 2em; }
 .title .sub { text-indent: 0; font-style: italic; color: #555; }
 .title .meta { text-indent: 0; margin-top: 3em; font-family: sans-serif;
   font-size: .75em; letter-spacing: .12em; text-transform: uppercase; color: #777; }
+.part-title { min-height: 80vh; display: flex; flex-direction: column; }
+.chapter.page-break .chapter-head.position-middle { padding-top: 28vh; }
+.chapter.page-break .chapter-head.position-bottom { padding-top: 48vh; }
+.colophon { page-break-before: always; break-before: page; }
 """
 
 XHTML = """<?xml version="1.0" encoding="utf-8"?>
@@ -484,8 +560,11 @@ def to_epub(
     modified = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     docs: list[tuple[str, str, str]] = []  # (id, filename, xhtml)
+    cover_kicker = DEFAULT_COVER_KICKER if options.cover_kicker is None else options.cover_kicker
     title_body = (
-        f'<div class="title"><h1>{html.escape(title)}</h1>'
+        f'<div class="title position-{options.cover_position}" style="text-align:{options.cover_alignment};justify-content:{_position_css(options.cover_position)}">'
+        + (f'<p class="kicker">{html.escape(cover_kicker.strip())}</p>' if cover_kicker.strip() else "")
+        + f'<h1>{html.escape(title)}</h1>'
         + (f'<p class="sub">{html.escape(subtitle)}</p>' if options.show_subtitle and subtitle else "")
         + f'<p class="meta">{html.escape(plan.audience)}</p></div>'
     )
@@ -495,8 +574,10 @@ def to_epub(
     toc_items: list[str] = []
     for part in plan.parts:
         part_body = (
+            f'<section class="part-title position-{options.part_position}" style="text-align:{options.part_alignment};justify-content:{_position_css(options.part_position)}">'
             f"<h1>{options.part_label.title()} {part.index}: {html.escape(part.title)}</h1>"
             + (f"<p>{html.escape(part.summary)}</p>" if part.summary else "")
+            + "</section>"
         )
         name = f"part{part.index}.xhtml"
         docs.append((f"part{part.index}", name, XHTML.format(title=part.title, body=part_body)))
@@ -508,8 +589,8 @@ def to_epub(
             break_class = " chapter-break" if options.chapter_new_page else ""
             label = f'<p class="chapter-num">{html.escape(marker)}</p>' if marker else ""
             body = (
-                f'<section class="chapter{break_class}">{label}'
-                f"<h1>{html.escape(chapter.title)}</h1>"
+                f'<section class="chapter{break_class}"><header class="chapter-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">{label}'
+                f"<h1>{html.escape(chapter.title)}</h1></header>"
                 f"{blocks_to_html(parse_markdown(text))}</section>"
             )
             ch_name = f"ch{chapter.index:02d}.xhtml"
@@ -518,6 +599,12 @@ def to_epub(
             )
             toc_items.append(f'<li><a href="{ch_name}">{html.escape(chapter.title)}</a></li>')
         toc_items.append("</ol></li>")
+
+    stamp = datetime.now(UTC).strftime("%d %B %Y")
+    imprint = _end_imprint(options, stamp=stamp, title=title, subtitle=subtitle)
+    if imprint:
+        imprint_html = '<section class="colophon"><p>' + html.escape(imprint).replace("\n", "<br/>") + "</p></section>"
+        docs.append(("colophon", "colophon.xhtml", XHTML.format(title="Colophon", body=imprint_html)))
 
     nav = XHTML.format(
         title="Contents",
@@ -582,11 +669,20 @@ def to_epub(
             f"text-align: {options.alignment}; }}",
         )
         epub_css += (
-            "\n.chapter-break { break-before: page; page-break-before: always; }\n"
-            ".chapter-num { font-family: sans-serif; font-size: .75em; text-indent: 0; }\n"
-            if options.chapter_new_page or options.chapter_heading != "title"
-            else ""
+            f"\n.title {{ text-align: {options.cover_alignment}; justify-content:{_position_css(options.cover_position)}; }}\n"
+            f".part-title {{ text-align: {options.part_alignment}; justify-content:{_position_css(options.part_position)}; }}\n"
+            f".chapter-head {{ text-align: {options.chapter_alignment}; }}\n"
+            ".title { min-height:80vh; display:flex; flex-direction:column; }\n"
+            ".part-title { min-height:80vh; display:flex; flex-direction:column; }\n"
         )
+        if options.chapter_new_page:
+            epub_css += (
+                "\n.chapter-break { break-before: page; page-break-before: always; }\n"
+                ".chapter-head.position-middle { padding-top:28vh; }\n"
+                ".chapter-head.position-bottom { padding-top:48vh; }\n"
+            )
+        if options.chapter_heading != "title":
+            epub_css += ".chapter-num { font-family: sans-serif; font-size: .75em; text-indent: 0; }\n"
         zf.writestr("OEBPS/style.css", epub_css, compress_type=zipfile.ZIP_DEFLATED)
         for _, filename, xhtml in docs:
             zf.writestr(f"OEBPS/{filename}", xhtml, compress_type=zipfile.ZIP_DEFLATED)
@@ -624,7 +720,7 @@ def to_pdf(
     options: ExportOptions | None = None,
 ) -> bytes:
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4, A5, LETTER
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
@@ -663,48 +759,52 @@ def to_pdf(
     paragraph_indent = 4.2 * mm if options.paragraph_style == "indent" else 0
     paragraph_gap = 0 if options.paragraph_style == "indent" else body_size * 0.75
     body_alignment = TA_JUSTIFY if options.alignment == "justify" else TA_LEFT
+    alignment_map = {"left": TA_LEFT, "center": TA_CENTER, "right": TA_RIGHT}
 
     styles = {
         "cover_kicker": ParagraphStyle(
             "CoverKicker", fontName=sans, fontSize=7.5, textColor=colors.HexColor("#6b5f52"),
-            leading=12, spaceAfter=18,
+            leading=12, spaceAfter=18, alignment=alignment_map[options.cover_alignment],
         ),
         "cover_title": ParagraphStyle(
             "CoverTitle", fontName=sans_bold, fontSize=27, leading=31,
             textColor=colors.HexColor("#17130f"), spaceAfter=10,
+            alignment=alignment_map[options.cover_alignment],
         ),
         "cover_sub": ParagraphStyle(
             "CoverSub", fontName=serif, fontSize=11.5, leading=16,
             textColor=colors.HexColor("#6b5f52"), spaceAfter=26,
+            alignment=alignment_map[options.cover_alignment],
         ),
         "cover_meta": ParagraphStyle(
             "CoverMeta", fontName=sans, fontSize=7.5, leading=12,
-            textColor=colors.HexColor("#6b5f52"),
+            textColor=colors.HexColor("#6b5f52"), alignment=alignment_map[options.cover_alignment],
         ),
         "cover_thesis": ParagraphStyle(
             "CoverThesis", fontName=serif, fontSize=9.5, leading=14,
             textColor=colors.HexColor("#6b5f52"), spaceBefore=34,
+            alignment=alignment_map[options.cover_alignment],
         ),
         "part_label": ParagraphStyle(
             "PartLabel", fontName=sans, fontSize=7.5, leading=12, spaceAfter=10,
-            textColor=colors.HexColor("#6b5f52"),
+            textColor=colors.HexColor("#6b5f52"), alignment=alignment_map[options.part_alignment],
         ),
         "part_title": ParagraphStyle(
             "PartTitle", fontName=sans_bold, fontSize=17, leading=22, spaceAfter=10,
-            textColor=colors.HexColor("#17130f"),
+            textColor=colors.HexColor("#17130f"), alignment=alignment_map[options.part_alignment],
         ),
         "part_summary": ParagraphStyle(
             "PartSummary", fontName=serif, fontSize=9.5, leading=14,
-            textColor=colors.HexColor("#6b5f52"),
+            textColor=colors.HexColor("#6b5f52"), alignment=alignment_map[options.part_alignment],
         ),
         "chapter_label": ParagraphStyle(
             "ChapterLabel", fontName=sans, fontSize=7, leading=10, spaceAfter=4,
-            textColor=colors.HexColor("#6b5f52"),
+            textColor=colors.HexColor("#6b5f52"), alignment=alignment_map[options.chapter_alignment],
         ),
         "chapter_title": ParagraphStyle(
             "ChapterTitle", fontName=sans_bold, fontSize=max(14, body_size * 1.5),
             leading=max(18, body_size * 1.9), spaceAfter=14, keepWithNext=True,
-            textColor=colors.HexColor("#17130f"),
+            textColor=colors.HexColor("#17130f"), alignment=alignment_map[options.chapter_alignment],
         ),
         "body_first": ParagraphStyle(
             "BodyFirst", fontName=serif, fontSize=body_size, leading=body_leading,
@@ -819,11 +919,16 @@ def to_pdf(
 
     # Optional cover (drawn on the bare template, then switch to body pages).
     if options.show_title_page:
+        cover_offset = _position_fraction(options.cover_position, top=0.15, middle=0.30, bottom=0.42) * (page_h - margin_top - margin_bottom)
         story += [
-            Spacer(1, 38 * mm),
-            Paragraph("A BOOK WRITTEN WITH BOOKWRIGHT", styles["cover_kicker"]),
+            Spacer(1, cover_offset),
+        ]
+        cover_kicker = DEFAULT_COVER_KICKER if options.cover_kicker is None else options.cover_kicker
+        if cover_kicker.strip():
+            story.append(Paragraph(html.escape(cover_kicker.strip()), styles["cover_kicker"]))
+        story += [
             HRFlowable(width=28 * mm, thickness=1.2, color=colors.HexColor("#17130f"),
-                       spaceBefore=0, spaceAfter=16),
+                       spaceBefore=0, spaceAfter=16, hAlign=options.cover_alignment.upper()),
             Paragraph(html.escape(title), styles["cover_title"]),
         ]
         if options.show_subtitle and subtitle:
@@ -852,7 +957,7 @@ def to_pdf(
 
     for part in plan.parts:
         story += [
-            Spacer(1, 34 * mm),
+            Spacer(1, _position_fraction(options.part_position, top=0.15, middle=0.30, bottom=0.42) * (page_h - margin_top - margin_bottom)),
             Paragraph(f"{options.part_label.upper()} {part.index}", styles["part_label"]),
             Paragraph(html.escape(part.title), styles["part_title"]),
         ]
@@ -863,6 +968,10 @@ def to_pdf(
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
             marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
+            if options.chapter_new_page:
+                offset = _position_fraction(options.chapter_position, top=0.0, middle=0.25, bottom=0.40) * (page_h - margin_top - margin_bottom)
+                if offset:
+                    story.append(Spacer(1, offset))
             if marker:
                 story.append(Paragraph(html.escape(marker.upper()), styles["chapter_label"]))
             story.append(Paragraph(html.escape(chapter.title), styles["chapter_title"]))
@@ -895,19 +1004,12 @@ def to_pdf(
         story.append(PageBreak())
 
     stamp = (generated_at or datetime.now(UTC)).strftime("%d %B %Y")
-    colophon_title = f"{title} — {subtitle}" if options.show_subtitle and subtitle else title
-    story += [
-        Spacer(1, 40 * mm),
-        Paragraph(html.escape(colophon_title), styles["toc_part"]),
-        Spacer(1, 4 * mm),
-        Paragraph(
-            f"Generated on {stamp} by Bookwright: an architect model planned the book, "
-            "a writer model drafted each chapter against a running continuity bible, and "
-            "an editor model summarised what had been written. Text is model output; "
-            "verify any claim before relying on it.",
-            styles["colophon"],
-        ),
-    ]
+    imprint = _end_imprint(options, stamp=stamp, title=title, subtitle=subtitle)
+    if imprint:
+        story += [
+            Spacer(1, 40 * mm),
+            Paragraph(html.escape(imprint).replace("\n", "<br/>"), styles["colophon"]),
+        ]
 
     doc.multiBuild(story)
     return buffer.getvalue()
