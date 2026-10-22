@@ -21,9 +21,9 @@ from bookwright.exporters import (
 )
 from bookwright.jobs import BookSpec, Job, chunk_text, estimate, run_book
 from bookwright.llm import GroqProvider, Usage, _backoff
-from bookwright.mock import MockProvider
+from bookwright.mock import MockProvider, compose_chapter
 from bookwright.prompts import chapter_messages, chapter_regeneration_messages, plan_messages
-from bookwright.schema import Plan, PlanError, parse_plan
+from bookwright.schema import Chapter, Plan, PlanError, parse_plan
 from bookwright.style import length_ratio, paragraph_diff, scan, summary, total
 
 # --------------------------------------------------------------------------- #
@@ -479,6 +479,7 @@ def test_chapter_regeneration_prompt_is_targeted():
     )
     assert len(messages) == 2
     assert "one chapter" in messages[0]["content"]
+    assert "private scaffolding" in messages[0]["content"]
     assert "Second person" in messages[0]["content"]
     assert "A distinct author sample" in messages[0]["content"]
     assert "Chapter 2: " + chapter.title in messages[1]["content"]
@@ -667,6 +668,59 @@ def test_export_options_change_chapter_heading_and_validate(finished):
         ExportOptions(page_size="tabloid")
     with pytest.raises(ValueError, match="margins"):
         ExportOptions(margins="huge")
+
+
+def test_demo_chapter_uses_reader_facing_headings_instead_of_beat_commands():
+    chapter = Chapter(
+        index=1,
+        title="Failure and practice",
+        purpose="Show the argument through concrete examples.",
+        beats=[
+            "Name the specific failure mode: identify the constraint.",
+            "Work one concrete example from a first attempt through a correction.",
+        ],
+        terms=[],
+        words=900,
+    )
+    text = compose_chapter("a useful topic", chapter, 900)
+    assert "Name the specific failure mode" not in text
+    assert "Work one concrete example from" not in text
+    assert "## Where the Pattern Breaks" in text
+    assert "## A Case in Practice" in text
+
+
+def test_export_can_remove_instructional_beat_leaks_without_changing_saved_text(finished):
+    plan, chapters = finished
+    plan.chapters[0].beats = [
+        "Name the specific failure mode: identify the constraint. Use this topic as the running case."
+    ]
+    original = chapters[1]["text"]
+    leaked = (
+        "Opening prose remains.\n\n"
+        "## Name the specific failure mode\n\n"
+        "This is where the chapter has to earn its place: Name the specific failure mode: "
+        "identify the constraint. Use this topic as the running case.\n\n"
+        "Closing prose remains."
+    )
+    altered = {**chapters, 1: {**chapters[1], "text": leaked}}
+
+    cleaned = to_markdown(plan, altered)
+    assert "Opening prose remains." in cleaned and "Closing prose remains." in cleaned
+    assert "Name the specific failure mode" not in cleaned
+    assert "Name the specific failure mode" in to_markdown(
+        plan, altered, options=ExportOptions(clean_scaffolding=False)
+    )
+    assert chapters[1]["text"] == original
+
+    html_output = to_html(plan, altered)
+    assert "Name the specific failure mode" not in html_output
+    with zipfile.ZipFile(io.BytesIO(to_epub(plan, altered))) as archive:
+        epub_text = "".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.endswith(".xhtml")
+        )
+    assert "Name the specific failure mode" not in epub_text
 
 
 

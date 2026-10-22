@@ -34,6 +34,7 @@ class ExportOptions:
     chapter_new_page: bool = True
     running_matter: bool = True
     page_numbers: bool = True
+    clean_scaffolding: bool = True
     unit_label: str = "chapter"
     part_label: str = "part"
     title_override: str | None = None
@@ -121,8 +122,39 @@ EXPORT_HYPHENS = str.maketrans({
 })
 
 
-def _normalized_export_inputs(plan: Plan, chapters: dict[int, dict]) -> tuple[Plan, dict[int, dict]]:
-    """Normalize uncommon hyphen glyphs without changing the stored book."""
+def _is_instructional_scaffold(paragraph: str, chapter) -> bool:
+    """Recognize short prompt-beat fragments accidentally copied into prose."""
+    normalized = " ".join(paragraph.strip().lstrip("#>*- ").split()).casefold()
+    if not normalized or len(normalized.split()) > 60:
+        return False
+    cues = [
+        "name the specific failure mode",
+        "work one concrete example",
+        "state the counter-intuitive claim",
+        "offer a diagnostic",
+        "separate what is trainable",
+    ]
+    for beat in chapter.beats:
+        core = re.sub(r"\s+Use .+? as the running case[.!]?$", "", beat, flags=re.I).strip()
+        cue = core.split(":", 1)[0] if ":" in core else core.split(".", 1)[0]
+        if len(cue.split()) >= 3:
+            cues.append(cue.casefold())
+    return any(cue in normalized for cue in cues)
+
+
+def _remove_instructional_scaffolding(text: str, chapter) -> str:
+    """Drop only short paragraphs that repeat the chapter's imperative beat prompts."""
+    segments = re.split(r"(\n[ \t]*\n)", text)
+    for index in range(0, len(segments), 2):
+        if _is_instructional_scaffold(segments[index], chapter):
+            segments[index] = ""
+    return re.sub(r"\n{3,}", "\n\n", "".join(segments)).strip()
+
+
+def _normalized_export_inputs(
+    plan: Plan, chapters: dict[int, dict], *, clean_scaffolding: bool = True
+) -> tuple[Plan, dict[int, dict]]:
+    """Normalize exported copies without changing the stored book."""
     plan_copy = copy.deepcopy(plan)
     for field_name in ("title", "subtitle", "thesis", "audience", "voice"):
         value = getattr(plan_copy, field_name)
@@ -135,9 +167,17 @@ def _normalized_export_inputs(plan: Plan, chapters: dict[int, dict]) -> tuple[Pl
             chapter.title = chapter.title.translate(EXPORT_HYPHENS)
 
     chapters_copy = copy.deepcopy(chapters)
-    for state in chapters_copy.values():
+    for index, state in chapters_copy.items():
         if isinstance(state, dict) and isinstance(state.get("text"), str):
-            state["text"] = state["text"].translate(EXPORT_HYPHENS)
+            text = state["text"].translate(EXPORT_HYPHENS)
+            if clean_scaffolding:
+                try:
+                    chapter = plan_copy.chapter(index)
+                except KeyError:
+                    chapter = None
+                if chapter is not None:
+                    text = _remove_instructional_scaffolding(text, chapter)
+            state["text"] = text
     return plan_copy, chapters_copy
 
 
@@ -335,7 +375,9 @@ def to_markdown(
     plan: Plan, chapters: dict[int, dict], *, options: ExportOptions | None = None
 ) -> str:
     options = options or DEFAULT_EXPORT_OPTIONS
-    plan, chapters = _normalized_export_inputs(plan, chapters)
+    plan, chapters = _normalized_export_inputs(
+        plan, chapters, clean_scaffolding=options.clean_scaffolding
+    )
     title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
     lines = [f"# {title}", ""]
     if options.show_subtitle and subtitle:
@@ -440,7 +482,9 @@ def to_html(
     options: ExportOptions | None = None,
 ) -> str:
     options = options or DEFAULT_EXPORT_OPTIONS
-    plan, chapters = _normalized_export_inputs(plan, chapters)
+    plan, chapters = _normalized_export_inputs(
+        plan, chapters, clean_scaffolding=options.clean_scaffolding
+    )
     stamp = (generated_at or datetime.now(UTC)).strftime("%d %B %Y")
     title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
     toc = ['<nav class="toc" id="contents"><h2>Contents</h2><ol>']
@@ -558,7 +602,9 @@ def to_epub(
     plan: Plan, chapters: dict[int, dict], *, options: ExportOptions | None = None
 ) -> bytes:
     options = options or DEFAULT_EXPORT_OPTIONS
-    plan, chapters = _normalized_export_inputs(plan, chapters)
+    plan, chapters = _normalized_export_inputs(
+        plan, chapters, clean_scaffolding=options.clean_scaffolding
+    )
     title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
     book_id = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, title + subtitle)}"
     modified = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -748,7 +794,9 @@ def to_pdf(
     from reportlab.platypus.tableofcontents import TableOfContents
 
     options = options or DEFAULT_EXPORT_OPTIONS
-    plan, chapters = _normalized_export_inputs(plan, chapters)
+    plan, chapters = _normalized_export_inputs(
+        plan, chapters, clean_scaffolding=options.clean_scaffolding
+    )
     fonts = _font_files()
     if {"serif", "serif_bold", "sans", "sans_bold"} <= fonts.keys():
         for name, path in fonts.items():

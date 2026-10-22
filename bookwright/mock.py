@@ -79,10 +79,11 @@ BODY = [
 ]
 
 BEAT_INTROS = [
-    "This is where the chapter has to earn its place: {beat_l}.",
-    "The argument only holds if we do something specific here — {beat_l}.",
-    "Here the abstraction has to touch ground: {beat_l}.",
-    "Before moving on, one thing must be made concrete. {beat_l}.",
+    "A recurring failure mode is easier to see once its costs accumulate.",
+    "The example becomes useful when the first attempt and its correction are both visible.",
+    "The less obvious claim is that the mechanism matters more than the anecdote.",
+    "A short diagnostic can show whether this pattern applies to a particular case.",
+    "The distinction is between a capacity that can be practiced and a preference that can only be expressed.",
 ]
 
 CLOSERS = [
@@ -182,11 +183,16 @@ def compose_chapter(topic: str, chapter: Chapter, target_words: int) -> str:
 
 
 def _heading_for(beat: str, i: int) -> str:
-    words = re.findall(r"[A-Za-z][A-Za-z'-]+", beat)
-    stub = " ".join(words[:5]).rstrip(",")
-    if not stub:
-        stub = f"Point {i + 1}"
-    return _sentence_case(stub)
+    """Use a reader-facing heading instead of repeating the beat instruction."""
+    cues = (
+        ("failure mode", "Where the Pattern Breaks"),
+        ("concrete example", "A Case in Practice"),
+        ("counter-intuitive", "The Unexpected Claim"),
+        ("diagnostic", "A Useful Diagnostic"),
+        ("trainable", "What Practice Can Change"),
+    )
+    lowered = beat.casefold()
+    return next((heading for cue, heading in cues if cue in lowered), f"Point {i + 1}")
 
 
 def _tidy(text: str) -> str:

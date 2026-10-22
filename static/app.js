@@ -1532,6 +1532,7 @@
             chapter_new_page: String($("#exp-chapter-break").checked),
             running_matter: String($("#exp-running-matter").checked),
             page_numbers: String($("#exp-page-numbers").checked),
+            clean_scaffolding: String($("#exp-clean-scaffolding").checked),
             unit_label: $("#exp-unit-label").value,
             part_label: $("#exp-part-label").value,
             title: $("#exp-title").value.trim(),

@@ -427,12 +427,13 @@
         </label>
         <div class="export-checks">
           <label><input type="checkbox" id="exp-chapter-break" checked> Start each major division on a new page</label>
+          <label><input type="checkbox" id="exp-clean-scaffolding" checked> Remove short leaked writing instructions</label>
           <label><input type="checkbox" id="exp-title-page" checked> Include title page (HTML, EPUB, PDF)</label>
           <label><input type="checkbox" id="exp-subtitle-visible" checked> Show subtitle</label>
           <label><input type="checkbox" id="exp-running-matter" checked> PDF running header</label>
           <label><input type="checkbox" id="exp-page-numbers" checked> PDF page numbers</label>
         </div>
-        <p class="hint">Title, subtitle, cover line, positioning, and end imprint are export-time only; they do not change the saved outline. Division vertical placement applies when each division starts on a new page. Vertical positioning is most reliable in PDF and print HTML; EPUB readers may adapt it. PDF running headers and page numbers are separate.</p>
+        <p class="hint">Title, subtitle, cover line, positioning, end imprint, and instruction cleanup are export-time only; the saved draft is unchanged. Instruction cleanup removes only short paragraphs/headings that repeat an outline beat as a command. Division vertical placement applies when each division starts on a new page. PDF running headers and page numbers are separate.</p>
       </details>
       <div class="export-grid" id="export-grid"></div>
       <p class="hint" id="export-hint">Files build on demand from what has been written.</p>
