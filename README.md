@@ -447,14 +447,16 @@ The panel also includes division/group labels, heading format (`Chapter 1`, `1.`
 paragraph indents versus spacing, body alignment, and a page break per major
 division. A checked export option removes short paragraphs or headings that clearly
 repeat a plan beat as a command; it edits only the exported copy, not the saved
-draft. PDF running-header text (left and right) and page numbers are controlled
-independently. EPUB readers control pagination; Markdown keeps the heading structure
+draft. Separate switches control part headings, part summaries, chapter titles,
+and chapter purposes (as chapter subtitles). Hidden chapter titles are replaced
+with generic chapter labels in contents/navigation. PDF running-header text (left
+and right) and page numbers are controlled independently. EPUB readers control pagination; Markdown keeps the heading structure
 and appends the imprint text.
 
 The settings are also available as query parameters, for example:
 
 ```text
-/api/books/<id>/export/pdf?page_size=letter&margins=wide&chapter_heading=none&clean_scaffolding=true&unit_label=essay&part_label=book&title=Sample&subtitle=An%20overview&cover_kicker=BOOKWRIGHT&cover_alignment=center&cover_position=middle&part_alignment=center&part_position=middle&chapter_alignment=left&chapter_position=top&end_imprint=Copyright%20by%20Author%20%7Bdate%7D&body_font_size=12&line_spacing=airy&paragraph_style=space&alignment=left&chapter_new_page=true&running_matter=true&page_numbers=false&header_left=Sample&header_right=AUTHOR&show_title_page=true&show_subtitle=true
+/api/books/<id>/export/pdf?page_size=letter&margins=wide&chapter_heading=none&clean_scaffolding=true&show_part_heading=false&show_part_subtitle=false&show_chapter_title=false&show_chapter_subtitle=false&unit_label=essay&part_label=book&title=Sample&subtitle=An%20overview&cover_kicker=BOOKWRIGHT&cover_alignment=center&cover_position=middle&part_alignment=center&part_position=middle&chapter_alignment=left&chapter_position=top&end_imprint=Copyright%20by%20Author%20%7Bdate%7D&body_font_size=12&line_spacing=airy&paragraph_style=space&alignment=left&chapter_new_page=true&running_matter=true&page_numbers=false&header_left=Sample&header_right=AUTHOR&show_title_page=true&show_subtitle=true
 ```
 
 For grounded or reviewed books, `POST /api/books` also accepts `notes`,

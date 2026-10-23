@@ -428,12 +428,16 @@
         <div class="export-checks">
           <label><input type="checkbox" id="exp-chapter-break" checked> Start each major division on a new page</label>
           <label><input type="checkbox" id="exp-clean-scaffolding" checked> Remove short leaked writing instructions</label>
+          <label><input type="checkbox" id="exp-show-part-heading" checked> Show part headings (number and title)</label>
+          <label><input type="checkbox" id="exp-show-part-subtitle" checked> Show part subtitles (summaries)</label>
+          <label><input type="checkbox" id="exp-show-chapter-title" checked> Show chapter titles</label>
+          <label><input type="checkbox" id="exp-show-chapter-subtitle"> Show chapter subtitles (purpose)</label>
           <label><input type="checkbox" id="exp-title-page" checked> Include title page (HTML, EPUB, PDF)</label>
           <label><input type="checkbox" id="exp-subtitle-visible" checked> Show subtitle</label>
           <label><input type="checkbox" id="exp-running-matter" checked> PDF running header</label>
           <label><input type="checkbox" id="exp-page-numbers" checked> PDF page numbers</label>
         </div>
-        <p class="hint">Title, subtitle, cover line, positioning, end imprint, and instruction cleanup are export-time only; the saved draft is unchanged. Instruction cleanup removes only short paragraphs/headings that repeat an outline beat as a command. Division vertical placement applies when each division starts on a new page. PDF running headers and page numbers are separate.</p>
+        <p class="hint">Title, subtitle, heading visibility, cover line, positioning, end imprint, and instruction cleanup are export-time only; the saved draft is unchanged. Part subtitles use the outline summary; chapter subtitles use the chapter purpose. Hidden chapter titles are replaced with generic chapter numbers in contents/navigation. Division vertical placement applies when each division starts on a new page. PDF running headers and page numbers are separate.</p>
       </details>
       <div class="export-grid" id="export-grid"></div>
       <p class="hint" id="export-hint">Files build on demand from what has been written.</p>

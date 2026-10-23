@@ -35,6 +35,10 @@ class ExportOptions:
     running_matter: bool = True
     page_numbers: bool = True
     clean_scaffolding: bool = True
+    show_part_heading: bool = True
+    show_part_subtitle: bool = True
+    show_chapter_title: bool = True
+    show_chapter_subtitle: bool = False
     unit_label: str = "chapter"
     part_label: str = "part"
     title_override: str | None = None
@@ -195,6 +199,23 @@ def _chapter_marker(index: int, style: str, unit_label: str = "chapter") -> str:
     if style == "number":
         return f"{index}."
     return ""
+
+
+def _chapter_heading(chapter, options: ExportOptions) -> tuple[str, str, str]:
+    """Return visible number marker, title, and combined chapter heading."""
+    marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
+    if marker and options.chapter_heading == "chapter":
+        marker += "."
+    title = chapter.title if options.show_chapter_title else ""
+    if options.chapter_heading == "none":
+        marker = title = ""
+    return marker, title, " ".join(value for value in (marker, title) if value).strip()
+
+
+def _chapter_toc_title(chapter, options: ExportOptions) -> str:
+    if options.show_chapter_title:
+        return chapter.title
+    return f"{options.unit_label.title()} {chapter.index}"
 
 
 def _display_title(plan: Plan, options: ExportOptions) -> str:
@@ -386,16 +407,16 @@ def to_markdown(
         lines += [f"> {plan.thesis}", ""]
     lines += ["---", ""]
     for part in plan.parts:
-        lines += [f"## {options.part_label.title()} {part.index}: {part.title}", ""]
-        if part.summary:
+        if options.show_part_heading:
+            lines += [f"## {options.part_label.title()} {part.index}: {part.title}", ""]
+        if options.show_part_subtitle and part.summary:
             lines += [f"*{part.summary}*", ""]
         for chapter in part.chapters:
-            if options.chapter_heading != "none":
-                marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
-                if marker and options.chapter_heading == "chapter":
-                    marker += "."
-                heading = f"{marker} {chapter.title}".strip()
+            _, _, heading = _chapter_heading(chapter, options)
+            if heading:
                 lines += [f"### {heading}", ""]
+            if options.show_chapter_subtitle and chapter.purpose:
+                lines += [f"*{chapter.purpose}*", ""]
             lines += [(chapters.get(chapter.index, {}).get("text") or "").strip(), ""]
     stamp = datetime.now(UTC).strftime("%d %B %Y")
     imprint = _end_imprint(options, stamp=stamp, title=title, subtitle=subtitle)
@@ -439,7 +460,8 @@ body { margin:0; color:var(--ink); background:var(--paper);
   min-height:80vh; }
 .part-title.position-top { padding-top:22vh; }
 .part-title h3 { font-size:1.9rem; margin:0 0 .8rem; font-weight:600; }
-.part-title p { color:var(--muted); font-style:italic; max-width:24em; }
+.part-title p, .chapter-subtitle { color:var(--muted); font-style:italic; max-width:30em; }
+.chapter-subtitle { margin:.5rem 0 1rem; }
 .chapter.page-break { page-break-before:always; break-before:page; }
 .chapter .ch-head { margin-bottom:2rem; }
 .chapter.page-break .ch-head.position-middle { padding-top:28vh; }
@@ -490,35 +512,52 @@ def to_html(
     toc = ['<nav class="toc" id="contents"><h2>Contents</h2><ol>']
     for part in plan.parts:
         part_heading = f"{options.part_label.title()} {part.index}: {part.title}"
-        toc.append(f'<li class="part"><a href="#part-{part.index}">{html.escape(part_heading)}</a>')
-        toc.append("<ol>")
+        if options.show_part_heading:
+            toc.append(f'<li class="part"><a href="#part-{part.index}">{html.escape(part_heading)}</a><ol>')
         for chapter in part.chapters:
             marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
+            if not options.show_chapter_title:
+                marker = f"{options.unit_label.title()} {chapter.index}"
             toc.append(
                 f'<li class="ch"><a href="#ch-{chapter.index}">'
                 + (f'<span>{html.escape(marker)}</span>' if marker else "")
-                + f"<span>{html.escape(chapter.title)}</span></a></li>"
+                + (f"<span>{html.escape(chapter.title)}</span>" if options.show_chapter_title else "")
+                + "</a></li>"
             )
-        toc.append("</ol></li>")
+        if options.show_part_heading:
+            toc.append("</ol></li>")
     toc.append("</ol></nav>")
 
     body: list[str] = []
     for part in plan.parts:
-        body.append(
-            f'<section class="part-title position-{options.part_position}" id="part-{part.index}" style="text-align:{options.part_alignment};justify-content:{_position_css(options.part_position)}"><h2>{options.part_label.title()} {part.index}</h2>'
-            f"<h3>{html.escape(part.title)}</h3>"
-            + (f"<p>{html.escape(part.summary)}</p>" if part.summary else "")
-            + "</section>"
-        )
+        part_title_bits = []
+        if options.show_part_heading:
+            part_title_bits.extend([
+                f"<h2>{options.part_label.title()} {part.index}</h2>",
+                f"<h3>{html.escape(part.title)}</h3>",
+            ])
+        if options.show_part_subtitle and part.summary:
+            part_title_bits.append(f"<p>{html.escape(part.summary)}</p>")
+        if part_title_bits:
+            body.append(
+                f'<section class="part-title position-{options.part_position}" id="part-{part.index}" style="text-align:{options.part_alignment};justify-content:{_position_css(options.part_position)}">'
+                + "".join(part_title_bits) + "</section>"
+            )
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
-            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
+            marker, chapter_title, _ = _chapter_heading(chapter, options)
             page_class = " page-break" if options.chapter_new_page else ""
-            label = f'<div class="ch-num">{html.escape(marker)}</div>' if marker else ""
+            heading_bits = []
+            if marker:
+                heading_bits.append(f'<div class="ch-num">{html.escape(marker)}</div>')
+            if chapter_title:
+                heading_bits.append(f"<h2>{html.escape(chapter_title)}</h2>")
+            if options.show_chapter_subtitle and chapter.purpose:
+                heading_bits.append(f'<p class="chapter-subtitle">{html.escape(chapter.purpose)}</p>')
             heading_html = (
-                f'<header class="ch-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">{label}'
-                f"<h2>{html.escape(chapter.title)}</h2></header>"
-                if options.chapter_heading != "none" else ""
+                f'<header class="ch-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">'
+                + "".join(heading_bits) + "</header>"
+                if heading_bits else ""
             )
             body.append(
                 f'<article class="chapter{page_class}" id="ch-{chapter.index}">'
@@ -587,6 +626,7 @@ li { margin: .35em 0; }
 .part-title { min-height: 80vh; display: flex; flex-direction: column; }
 .chapter.page-break .chapter-head.position-middle { padding-top: 28vh; }
 .chapter.page-break .chapter-head.position-bottom { padding-top: 48vh; }
+.chapter-subtitle { color:#555; font-style:italic; margin:.4em 0 1em; }
 .colophon { page-break-before: always; break-before: page; }
 """
 
@@ -623,36 +663,51 @@ def to_epub(
 
     toc_items: list[str] = []
     for part in plan.parts:
-        part_body = (
-            f'<section class="part-title position-{options.part_position}" style="text-align:{options.part_alignment};justify-content:{_position_css(options.part_position)}">'
-            f"<h1>{options.part_label.title()} {part.index}: {html.escape(part.title)}</h1>"
-            + (f"<p>{html.escape(part.summary)}</p>" if part.summary else "")
-            + "</section>"
-        )
-        name = f"part{part.index}.xhtml"
-        docs.append((f"part{part.index}", name, XHTML.format(title=part.title, body=part_body)))
+        part_title_bits = []
+        if options.show_part_heading:
+            part_title_bits.append(
+                f"<h1>{options.part_label.title()} {part.index}: {html.escape(part.title)}</h1>"
+            )
+        if options.show_part_subtitle and part.summary:
+            part_title_bits.append(f"<p>{html.escape(part.summary)}</p>")
+        if part_title_bits:
+            part_body = (
+                f'<section class="part-title position-{options.part_position}" style="text-align:{options.part_alignment};justify-content:{_position_css(options.part_position)}">'
+                + "".join(part_title_bits) + "</section>"
+            )
+            part_name = f"part{part.index}.xhtml"
+            docs.append((f"part{part.index}", part_name, XHTML.format(title=part.title if options.show_part_heading else "", body=part_body)))
+        else:
+            part_name = ""
         part_heading = f"{options.part_label.title()} {part.index}: {part.title}"
-        toc_items.append(f'<li><a href="{name}">{html.escape(part_heading)}</a><ol>')
+        if options.show_part_heading:
+            toc_items.append(f'<li><a href="{part_name}">{html.escape(part_heading)}</a><ol>')
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
-            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
+            marker, chapter_title, _ = _chapter_heading(chapter, options)
             break_class = " chapter-break" if options.chapter_new_page else ""
-            label = f'<p class="chapter-num">{html.escape(marker)}</p>' if marker else ""
+            heading_bits = []
+            if marker:
+                heading_bits.append(f'<p class="chapter-num">{html.escape(marker)}</p>')
+            if chapter_title:
+                heading_bits.append(f"<h1>{html.escape(chapter_title)}</h1>")
+            if options.show_chapter_subtitle and chapter.purpose:
+                heading_bits.append(f'<p class="chapter-subtitle">{html.escape(chapter.purpose)}</p>')
             heading_html = (
-                f'<header class="chapter-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">{label}'
-                f"<h1>{html.escape(chapter.title)}</h1></header>"
-                if options.chapter_heading != "none" else ""
+                f'<header class="chapter-head position-{options.chapter_position}" style="text-align:{options.chapter_alignment}">'
+                + "".join(heading_bits) + "</header>"
+                if heading_bits else ""
             )
             body = (
                 f'<section class="chapter{break_class}">{heading_html}'
                 f"{blocks_to_html(parse_markdown(text))}</section>"
             )
             ch_name = f"ch{chapter.index:02d}.xhtml"
-            docs.append(
-                (f"ch{chapter.index:02d}", ch_name, XHTML.format(title=chapter.title, body=body))
-            )
-            toc_items.append(f'<li><a href="{ch_name}">{html.escape(chapter.title)}</a></li>')
-        toc_items.append("</ol></li>")
+            docs.append((f"ch{chapter.index:02d}", ch_name, XHTML.format(title=chapter_title or _chapter_toc_title(chapter, options), body=body)))
+            toc_title = _chapter_toc_title(chapter, options)
+            toc_items.append(f'<li><a href="{ch_name}">{html.escape(toc_title)}</a></li>')
+        if options.show_part_heading:
+            toc_items.append("</ol></li>")
 
     stamp = datetime.now(UTC).strftime("%d %B %Y")
     imprint = _end_imprint(options, stamp=stamp, title=title, subtitle=subtitle)
@@ -858,6 +913,15 @@ def to_pdf(
             "ChapterLabel", fontName=sans, fontSize=7, leading=10, spaceAfter=4,
             textColor=colors.HexColor("#6b5f52"), alignment=alignment_map[options.chapter_alignment],
         ),
+        "chapter_subtitle": ParagraphStyle(
+            "ChapterSubtitle", fontName=serif, fontSize=9.5, leading=14,
+            spaceAfter=12, textColor=colors.HexColor("#6b5f52"),
+            alignment=alignment_map[options.chapter_alignment],
+        ),
+        "toc_anchor": ParagraphStyle(
+            "TocAnchor", fontName=serif, fontSize=0, leading=0,
+            spaceBefore=0, spaceAfter=0,
+        ),
         "chapter_title": ParagraphStyle(
             "ChapterTitle", fontName=sans_bold, fontSize=max(14, body_size * 1.5),
             leading=max(18, body_size * 1.9), spaceAfter=14, keepWithNext=True,
@@ -963,12 +1027,20 @@ def to_pdf(
                 return
             style = flowable.style.name
             text = flowable.getPlainText()
-            if style in {"PartTitle", "ChapterTitle"}:
-                level = 0 if style == "PartTitle" else 1
-                key = f"{style}-{self.page}-{abs(hash(text))}"
-                self.canv.bookmarkPage(key)
-                self.canv.addOutlineEntry(text, key, level=level, closed=False)
+            if style == "PartTitle":
+                level = 0
+            elif style == "ChapterTitle":
+                level = 0 if not options.show_part_heading else 1
+            elif style == "TocAnchor":
+                level = 0 if not options.show_part_heading else 1
                 self.notify("TOCEntry", (level, text, self.page))
+                return
+            else:
+                return
+            key = f"{style}-{self.page}-{abs(hash(text))}"
+            self.canv.bookmarkPage(key)
+            self.canv.addOutlineEntry(text, key, level=level, closed=False)
+            self.notify("TOCEntry", (level, text, self.page))
 
     buffer = io.BytesIO()
     doc = BookDoc(buffer)
@@ -1013,18 +1085,24 @@ def to_pdf(
     story += [toc, PageBreak()]
 
     for part in plan.parts:
-        story += [
-            Spacer(1, _position_fraction(options.part_position, top=0.15, middle=0.30, bottom=0.42) * (page_h - margin_top - margin_bottom)),
-            Paragraph(f"{options.part_label.upper()} {part.index}", styles["part_label"]),
-            Paragraph(html.escape(part.title), styles["part_title"]),
-        ]
-        if part.summary:
-            story.append(Paragraph(html.escape(part.summary), styles["part_summary"]))
-        story.append(PageBreak())
+        part_has_page = options.show_part_heading or (options.show_part_subtitle and bool(part.summary))
+        if part_has_page:
+            story.append(Spacer(1, _position_fraction(options.part_position, top=0.15, middle=0.30, bottom=0.42) * (page_h - margin_top - margin_bottom)))
+            if options.show_part_heading:
+                story += [
+                    Paragraph(f"{options.part_label.upper()} {part.index}", styles["part_label"]),
+                    Paragraph(html.escape(part.title), styles["part_title"]),
+                ]
+            if options.show_part_subtitle and part.summary:
+                story.append(Paragraph(html.escape(part.summary), styles["part_summary"]))
+            story.append(PageBreak())
 
         for chapter in part.chapters:
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
-            marker = _chapter_marker(chapter.index, options.chapter_heading, options.unit_label)
+            marker, chapter_title, _ = _chapter_heading(chapter, options)
+            if not options.show_chapter_title:
+                toc_title = _chapter_toc_title(chapter, options)
+                story.append(Paragraph(html.escape(toc_title), styles["toc_anchor"]))
             if options.chapter_heading != "none":
                 if options.chapter_new_page:
                     offset = _position_fraction(options.chapter_position, top=0.0, middle=0.25, bottom=0.40) * (page_h - margin_top - margin_bottom)
@@ -1032,7 +1110,10 @@ def to_pdf(
                         story.append(Spacer(1, offset))
                 if marker:
                     story.append(Paragraph(html.escape(marker.upper()), styles["chapter_label"]))
-                story.append(Paragraph(html.escape(chapter.title), styles["chapter_title"]))
+                if chapter_title:
+                    story.append(Paragraph(html.escape(chapter_title), styles["chapter_title"]))
+            if options.show_chapter_subtitle and chapter.purpose:
+                story.append(Paragraph(html.escape(chapter.purpose), styles["chapter_subtitle"]))
             first_para = True
             for block in parse_markdown(text):
                 if block.type == "h":

@@ -670,6 +670,71 @@ def test_export_options_change_chapter_heading_and_validate(finished):
         ExportOptions(margins="huge")
 
 
+def test_export_visibility_controls_for_part_and_chapter_headings_and_subtitles(finished):
+    plan, _ = finished
+    part = plan.parts[0]
+    chapter = part.chapters[0]
+    part.title = "Unique Part Heading"
+    part.summary = "Unique Part Subtitle"
+    chapter.title = "Unique Chapter Title"
+    chapter.purpose = "Unique Chapter Subtitle"
+    prose = {c.index: {"text": "Ordinary body prose remains visible."} for c in plan.chapters}
+
+    hidden = ExportOptions(
+        chapter_heading="none",
+        show_part_heading=False,
+        show_part_subtitle=False,
+        show_chapter_title=False,
+        show_chapter_subtitle=False,
+    )
+    markdown = to_markdown(plan, prose, options=hidden)
+    for secret in (part.title, part.summary, chapter.title, chapter.purpose):
+        assert secret not in markdown
+
+    html_output = to_html(plan, prose, options=hidden)
+    for secret in (part.title, part.summary, chapter.title, chapter.purpose):
+        assert secret not in html_output
+    assert "Chapter 1" in html_output  # generic contents label, not the hidden title
+
+    epub = to_epub(plan, prose, options=hidden)
+    with zipfile.ZipFile(io.BytesIO(epub)) as archive:
+        epub_text = "".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.endswith(".xhtml")
+        )
+    for secret in (part.title, part.summary, chapter.title, chapter.purpose):
+        assert secret not in epub_text
+    assert "Chapter 1" in epub_text
+
+    visible = ExportOptions(show_chapter_subtitle=True)
+    visible_markdown = to_markdown(plan, prose, options=visible)
+    for item in (part.title, part.summary, chapter.title, chapter.purpose):
+        assert item in visible_markdown
+    visible_html = to_html(plan, prose, options=visible)
+    for item in (part.title, part.summary, chapter.title, chapter.purpose):
+        assert item in visible_html
+    visible_epub = to_epub(plan, prose, options=visible)
+    with zipfile.ZipFile(io.BytesIO(visible_epub)) as archive:
+        visible_epub_text = "".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.endswith(".xhtml")
+        )
+    for item in (part.title, part.summary, chapter.title, chapter.purpose):
+        assert item in visible_epub_text
+
+    pymupdf = pytest.importorskip("pymupdf")
+    pdf, _, _ = export(plan, prose, "pdf", options=hidden)
+    hidden_pdf_text = "".join(page.get_text() for page in pymupdf.open(stream=pdf, filetype="pdf"))
+    for secret in (part.title, part.summary, chapter.title, chapter.purpose):
+        assert secret not in hidden_pdf_text
+    visible_pdf, _, _ = export(plan, prose, "pdf", options=visible)
+    visible_pdf_text = "".join(page.get_text() for page in pymupdf.open(stream=visible_pdf, filetype="pdf"))
+    for item in (part.title, part.summary, chapter.title, chapter.purpose):
+        assert item in visible_pdf_text
+
+
 def test_demo_chapter_uses_reader_facing_headings_instead_of_beat_commands():
     chapter = Chapter(
         index=1,
@@ -869,6 +934,25 @@ def test_export_api_forwards_structure_and_title_overrides(finished, monkeypatch
     assert no_heading.status_code == 200
     no_heading_article = no_heading.text.split('id="ch-1"', 1)[1].split("</article>", 1)[0]
     assert "ch-head" not in no_heading_article
+
+    plan.parts[0].title = "API Hidden Part Heading"
+    plan.parts[0].summary = "API Hidden Part Subtitle"
+    plan.parts[0].chapters[0].title = "API Hidden Chapter Title"
+    plan.parts[0].chapters[0].purpose = "API Hidden Chapter Subtitle"
+    hidden = TestClient(server.app).get(
+        f"/api/books/{job.id}/export/html",
+        params={
+            "chapter_heading": "none", "show_part_heading": "false",
+            "show_part_subtitle": "false", "show_chapter_title": "false",
+            "show_chapter_subtitle": "false",
+        },
+    )
+    assert hidden.status_code == 200
+    for secret in (
+        "API Hidden Part Heading", "API Hidden Part Subtitle",
+        "API Hidden Chapter Title", "API Hidden Chapter Subtitle",
+    ):
+        assert secret not in hidden.text
 
 
 def test_cover_positioning_and_custom_end_imprint_across_formats(finished):
