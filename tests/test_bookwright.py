@@ -729,6 +729,13 @@ def test_export_visibility_controls_for_part_and_chapter_headings_and_subtitles(
     hidden_pdf_text = "".join(page.get_text() for page in pymupdf.open(stream=pdf, filetype="pdf"))
     for secret in (part.title, part.summary, chapter.title, chapter.purpose):
         assert secret not in hidden_pdf_text
+    hidden_pdf_doc = pymupdf.open(stream=pdf, filetype="pdf")
+    toc_page = next(page for page in hidden_pdf_doc if "Contents" in page.get_text())
+    chapter_page = next(
+        page for page in hidden_pdf_doc if "Ordinary body prose remains visible." in page.get_text()
+    )
+    assert "Chapter 1" in toc_page.get_text()  # generic TOC label is retained
+    assert "Chapter 1" not in chapter_page.get_text()  # no zero-size text in chapter body
     visible_pdf, _, _ = export(plan, prose, "pdf", options=visible)
     visible_pdf_text = "".join(page.get_text() for page in pymupdf.open(stream=visible_pdf, filetype="pdf"))
     for item in (part.title, part.summary, chapter.title, chapter.purpose):

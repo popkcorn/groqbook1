@@ -838,6 +838,7 @@ def to_pdf(
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.platypus import (
         BaseDocTemplate,
+        Flowable,
         Frame,
         HRFlowable,
         NextPageTemplate,
@@ -847,6 +848,19 @@ def to_pdf(
         Spacer,
     )
     from reportlab.platypus.tableofcontents import TableOfContents
+
+    class TOCAnchor(Flowable):
+        """Zero-sized TOC entry marker; unlike empty text, it draws no PDF glyphs."""
+
+        def __init__(self, label: str):
+            super().__init__()
+            self.label = label
+
+        def wrap(self, avail_width, avail_height):
+            return 0, 0
+
+        def draw(self):
+            pass
 
     options = options or DEFAULT_EXPORT_OPTIONS
     plan, chapters = _normalized_export_inputs(
@@ -917,10 +931,6 @@ def to_pdf(
             "ChapterSubtitle", fontName=serif, fontSize=9.5, leading=14,
             spaceAfter=12, textColor=colors.HexColor("#6b5f52"),
             alignment=alignment_map[options.chapter_alignment],
-        ),
-        "toc_anchor": ParagraphStyle(
-            "TocAnchor", fontName=serif, fontSize=0, leading=0,
-            spaceBefore=0, spaceAfter=0,
         ),
         "chapter_title": ParagraphStyle(
             "ChapterTitle", fontName=sans_bold, fontSize=max(14, body_size * 1.5),
@@ -1023,6 +1033,10 @@ def to_pdf(
             canvas.restoreState()
 
         def afterFlowable(self, flowable):
+            if isinstance(flowable, TOCAnchor):
+                level = 0 if not options.show_part_heading else 1
+                self.notify("TOCEntry", (level, flowable.label, self.page))
+                return
             if not isinstance(flowable, Paragraph):
                 return
             style = flowable.style.name
@@ -1031,10 +1045,6 @@ def to_pdf(
                 level = 0
             elif style == "ChapterTitle":
                 level = 0 if not options.show_part_heading else 1
-            elif style == "TocAnchor":
-                level = 0 if not options.show_part_heading else 1
-                self.notify("TOCEntry", (level, text, self.page))
-                return
             else:
                 return
             key = f"{style}-{self.page}-{abs(hash(text))}"
@@ -1101,8 +1111,7 @@ def to_pdf(
             text = (chapters.get(chapter.index, {}).get("text") or "").strip()
             marker, chapter_title, _ = _chapter_heading(chapter, options)
             if not options.show_chapter_title:
-                toc_title = _chapter_toc_title(chapter, options)
-                story.append(Paragraph(html.escape(toc_title), styles["toc_anchor"]))
+                story.append(TOCAnchor(_chapter_toc_title(chapter, options)))
             if options.chapter_heading != "none":
                 if options.chapter_new_page:
                     offset = _position_fraction(options.chapter_position, top=0.0, middle=0.25, bottom=0.40) * (page_h - margin_top - margin_bottom)
