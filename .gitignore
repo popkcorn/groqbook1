@@ -1,2 +1,10 @@
 .env
 venv
+.venvs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.streamlit/secrets.toml
+generated_book.*
+*.pdf

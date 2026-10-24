@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".git", "venv", ".venvs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S", "BLE"]
+ignore = ["S101", "B008", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# The original single-file app is kept untouched as a reference; it predates
+# these rules and is superseded by bookwright/.
+"main.py" = ["ALL"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookwright — write a book from a sentence</title>
+<meta name="description" content="A staged book-writing model: architect, writer, editor, composer.">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='25' font-size='26'>📖</text></svg>">
+</head>
+<body>
+<div class="progress-rail" id="rail" aria-hidden="true"><span></span></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">B</span>
+    <div>
+      <h1>Bookwright</h1>
+      <p>A staged model for short books</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="mode-badge" id="mode-badge" title="Which backend is writing">demo</span>
+    <button class="ghost" id="key-btn" type="button">API key</button>
+  </div>
+</header>
+
+<main class="shell">
+  <aside class="panel" id="panel">
+    <form id="brief" autocomplete="off">
+      <label class="field">
+        <span class="label">What is the book about?</span>
+        <textarea id="topic" rows="3" maxlength="240" required
+          placeholder="e.g. why cities keep building systems nobody can maintain"></textarea>
+        <span class="hint"><span id="topic-count">0</span>/240 · a subject, not a title</span>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span class="label">Reader</span>
+          <select id="audience"></select>
+          <span class="hint">Sets assumed background knowledge, explanation depth, and useful examples.</span>
+        </label>
+        <label class="field">
+          <span class="label">Voice</span>
+          <select id="tone"></select>
+          <span class="hint" id="tone-hint"></span>
+        </label>
+      </div>
+
+      <div class="field">
+        <span class="label">Length</span>
+        <div class="chips" id="lengths" role="radiogroup" aria-label="Length"></div>
+        <div class="custom-length" id="custom-length" hidden>
+          <label class="mini">
+            <span id="custom-units-label">Chapters</span>
+            <input id="c-chapters" type="number" min="2" max="20" step="1" value="10">
+          </label>
+          <label class="mini">
+            <span id="custom-words-label">Words / chapter</span>
+            <input id="c-words" type="number" min="250" max="2000" step="50" value="1000">
+          </label>
+          <p class="hint" id="custom-summary">10 chapters · ~10,000 words</p>
+        </div>
+      </div>
+
+      <details class="style-panel" id="structure-panel">
+        <summary><span>Book structure</span><span class="style-count">optional</span></summary>
+        <div class="field-row">
+          <label class="field"><span class="label">Major division name</span>
+            <select id="unit-label">
+              <option value="chapter">Chapter</option><option value="section">Section</option>
+              <option value="essay">Essay</option><option value="entry">Entry</option>
+            </select>
+            <span class="hint">A 2,000-word division can be a short chapter or an essay; it is not a paragraph.</span>
+          </label>
+          <label class="field"><span class="label">Group name</span>
+            <select id="part-label">
+              <option value="part">Part</option><option value="book">Book</option>
+              <option value="volume">Volume</option>
+            </select>
+          </label>
+          <label class="field"><span class="label">Number of groups</span>
+            <select id="group-count"><option value="">Automatic</option>
+              <option value="1">1 group</option><option value="2">2 groups</option>
+              <option value="3">3 groups</option><option value="4">4 groups</option>
+              <option value="5">5 groups</option><option value="6">6 groups</option>
+            </select>
+          </label>
+        </div>
+        <label class="field"><span class="label">Internal headings</span>
+          <select id="subheading-style">
+            <option value="none">Continuous prose — no internal headings</option>
+            <option value="few">Few — at most 1–2</option>
+            <option value="standard" selected>Standard — 2–4 where useful</option>
+            <option value="detailed">Detailed — 4–6 major steps</option>
+          </select>
+          <span class="hint">“No internal headings” still keeps each major division as a chapter, section, essay, or entry.</span>
+        </label>
+      </details>
+
+      <details class="style-panel" id="grounding">
+        <summary>
+          <span>Notes &amp; voice</span>
+          <span class="style-count" id="grounding-count">optional</span>
+        </summary>
+        <label class="field extra-field">
+          <span class="label">Facts, notes and sources</span>
+          <textarea id="notes" rows="4" maxlength="4000"
+            placeholder="Figures, dates, names, case studies, quotes — the material the book should be built from."></textarea>
+          <span class="hint"><span id="notes-count">0</span>/4000 · carried in the bible with every chapter</span>
+        </label>
+        <label class="field extra-field">
+          <span class="label">Voice sample</span>
+          <textarea id="voice-sample" rows="3" maxlength="1200"
+            placeholder="Paste a paragraph whose rhythm you want the book to have."></textarea>
+          <span class="hint"><span id="voice-count">0</span>/1200 · cadence and diction only; its content is not reused</span>
+        </label>
+        <label class="field">
+          <span class="label">Point of view</span>
+          <select id="pov"></select>
+          <span class="hint" id="pov-hint">A rule that contradicts this is switched off rather than half-applied.</span>
+        </label>
+      </details>
+
+      <details class="style-panel model-panel" id="model-panel">
+        <summary>
+          <span>Groq models</span>
+          <span class="style-count" id="model-count">server defaults</span>
+        </summary>
+        <p class="hint panel-hint">Choose different Groq models for planning, chapter writing, and editing. Model choice can change capability, writing style, speed, context size, and token use. The list and metadata are fetched from Groq using your key; the key is not saved in the book job.</p>
+        <button class="ghost model-load" id="model-load" type="button">Load models from Groq</button>
+        <p class="hint" id="model-list-status">Add a Groq API key to browse models. Demo mode uses fixed sample prose.</p>
+        <label class="field model-field">
+          <span class="label">Architect · outline and argument</span>
+          <select id="architect-model"></select>
+          <span class="hint" id="architect-model-info"></span>
+        </label>
+        <label class="field model-field">
+          <span class="label">Writer · chapter prose</span>
+          <select id="writer-model"></select>
+          <span class="hint" id="writer-model-info"></span>
+        </label>
+        <label class="field model-field">
+          <span class="label">Editor · summaries and style pass</span>
+          <select id="editor-model"></select>
+          <span class="hint" id="editor-model-info"></span>
+        </label>
+      </details>
+
+      <details class="style-panel" id="style-panel">
+        <summary>
+          <span>Style controls</span>
+          <span class="style-count" id="style-count">5 active</span>
+        </summary>
+        <div class="profiles" id="profiles" role="radiogroup" aria-label="Editorial profile"></div>
+        <p class="hint panel-hint">Profiles set the switches, intensity and house style at once.
+          Everything below stays editable.</p>
+        <div class="toggles" id="anti-patterns"></div>
+        <div class="stylist-row">
+          <label class="toggle stylist-toggle">
+            <input type="checkbox" id="stylist-on" checked>
+            <span class="t-label">Editorial de-AI pass
+              <span class="t-desc">After each chapter is drafted, scan it and rewrite only the passages
+                that still break the rules above. Rejected if the rewrite loses meaning, length or fails
+                to reduce the flags.</span>
+            </span>
+          </label>
+          <label class="mini stylist-strength">
+            <span>Intensity</span>
+            <select id="stylist-strength">
+              <option value="gentle">Gentle — 5+ flags</option>
+              <option value="standard" selected>Standard — 2+ flags</option>
+              <option value="aggressive">Aggressive — any flag</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="field extra-field banned-field">
+          <span class="label">Banned words and phrases</span>
+          <textarea id="banned-phrases" rows="2" maxlength="600"
+            placeholder="synergy, paradigm shift, thought leader — one per line or comma separated"></textarea>
+          <span class="hint"><span id="banned-count">0</span>/25 phrases · enforced in the prompt and checked by the editor</span>
+        </label>
+
+        <label class="field extra-field">
+          <span class="label">House style (optional)</span>
+          <textarea id="extra-instructions" rows="2" maxlength="400"
+            placeholder="e.g. British spelling, no rhetorical questions, name real places, keep paragraphs short"></textarea>
+          <span class="hint"><span id="extra-count">0</span>/400 · your own words, applied to every chapter</span>
+        </label>
+      </details>
+
+      <label class="toggle outline-toggle">
+        <input type="checkbox" id="review-outline" checked>
+        <span class="t-label">Review the outline before writing
+          <span class="t-desc">The architect's plan appears for editing — retitle chapters, rewrite the beats,
+            add or drop one — and no chapter is written until you approve it.</span>
+        </span>
+      </label>
+
+      <button class="primary" id="go" type="submit">
+        <span>Write the book</span>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <p class="estimate" id="estimate">No key needed in demo mode.</p>
+
+      <details class="option-guide">
+        <summary>What does each option change?</summary>
+        <div class="guide-section">
+          <h3>Writing the book</h3>
+          <dl>
+            <dt>Subject</dt>
+            <dd>Gives the architect the topic to argue and organize around; enter a subject, not a finished title.</dd>
+            <dt>Reader</dt>
+            <dd>Sets assumed background knowledge, explanation depth, and useful examples. General readers get more foundations; practitioners get applied detail; students get concepts explained; executives get decision-focused framing; specialists get deeper technical language.</dd>
+            <dt>Voice</dt>
+            <dd>Sets the prose tone—such as plain, narrative, rigorous, or playful—and influences both the outline and chapters.</dd>
+            <dt>Length</dt>
+            <dd>Sets the number of major divisions and target words in each. A 2,000-word unit is a short chapter/essay, not a paragraph; the label is your choice. Custom lets you choose the count and word target.</dd>
+            <dt>Book structure</dt>
+            <dd>Choose reader-facing names and count for groups and major divisions, plus continuous prose or a chosen density of internal section headings. JSON/API structure remains compatible.</dd>
+            <dt>Facts, notes and sources</dt>
+            <dd>Supplies grounding material for planning and every chapter. The model is asked to use it rather than invent specifics, but it is not a fact-checker.</dd>
+            <dt>Voice sample</dt>
+            <dd>Guides cadence and diction only. The sample's wording and facts are not meant to be reused.</dd>
+            <dt>Point of view</dt>
+            <dd>Chooses the narrative perspective (I, we, you, third person, or automatic); conflicting style rules are switched off.</dd>
+            <dt>Editorial profile</dt>
+            <dd>Applies a bundle of style switches, editing intensity, and house-style instructions. You can adjust each one afterwards; the available profiles are:
+              <div class="guide-profile-list" id="guide-profiles"></div>
+            </dd>
+            <dt>Style switches</dt>
+            <dd>Tell the writer what to avoid and enable matching checks in the editorial pass. Each switch's description names the pattern it targets.</dd>
+            <dt>Editorial de-AI pass</dt>
+            <dd>When on, scans finished chapters and selectively rewrites flagged passages. This can change prose, and adds model calls and time.</dd>
+            <dt>Intensity</dt>
+            <dd>Controls when the editor runs: Gentle at 5+ flags, Standard at 2+, or Aggressive for any flag. Higher intensity can edit more passages.</dd>
+            <dt>Banned words and phrases</dt>
+            <dd>Lists terms the writer is told to avoid; the editor also checks for them in the draft.</dd>
+            <dt>House style</dt>
+            <dd>Adds your own short instructions to every chapter prompt—for example, spelling, paragraph length, or naming preferences.</dd>
+            <dt>Review the outline</dt>
+            <dd>Pauses after planning so you can edit the title, chapters, purposes, and beats before drafting. Turn it off to start writing automatically.</dd>
+            <dt>API key / mode</dt>
+            <dd>A Groq key enables live model output. Without a key, demo mode uses fixed sample prose and does not generate custom content.</dd>
+          </dl>
+        </div>
+        <div class="guide-section">
+          <h3>Export layout</h3>
+          <dl>
+            <dt>File format</dt>
+            <dd>Markdown is easy to edit, HTML is for browsers and printing, EPUB is for e-readers, and PDF preserves a fixed page layout.</dd>
+            <dt>Page size and margins</dt>
+            <dd>Set the page dimensions and printable area; they change layout and page count, not the prose.</dd>
+            <dt>Division heading</dt>
+            <dd>Chooses whether exports label major divisions with their selected name (for example, “Essay 1”), a number, or title only.</dd>
+            <dt>Title, subtitle and cover line</dt>
+            <dd>Edit the actual cover title/subtitle and the line above them (for example, “BOOKWRIGHT”). Clear the subtitle or cover line if you do not want one.</dd>
+            <dt>Page positioning</dt>
+            <dd>Choose left, centered, or right alignment and top, middle, or bottom placement separately for the cover, group openers, and division headings. Vertical placement is most reliable in PDF and print HTML.</dd>
+            <dt>End imprint</dt>
+            <dd>Edit or clear the text at the very end of Markdown, HTML, EPUB, and PDF. Use {date}, {title}, {subtitle}, {unit}, and {group} for values filled in at export time.</dd>
+            <dt>PDF running header</dt>
+            <dd>Set the left and right running header text independently. Page numbers can be enabled separately.</dd>
+            <dt>Body size and line spacing</dt>
+            <dd>Change the type size and vertical breathing room, affecting readability and pagination.</dd>
+            <dt>Paragraphs and alignment</dt>
+            <dd>Choose first-line indents or paragraph gaps, then left alignment or justified text.</dd>
+            <dt>New page per major division</dt>
+            <dd>Starts each major division on a fresh page in PDF and print-ready HTML.</dd>
+
+          </dl>
+        </div>
+        <p class="guide-foot">Export settings affect presentation only. Page pagination is controlled by the reader in EPUB; Markdown uses the chapter-heading choice.</p>
+      </details>
+    </form>
+
+    <section class="run" id="run" hidden>
+      <div class="run-head">
+        <span class="pulse" aria-hidden="true"></span>
+        <p id="status" role="status" aria-live="polite">Ready</p>
+      </div>
+      <div class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
+      <dl class="stats">
+        <div><dt id="s-units-label">Chapters</dt><dd id="s-chapters">0/0</dd></div>
+        <div><dt>Words written</dt><dd id="s-words">0</dd></div>
+        <div><dt>Tokens</dt><dd id="s-tokens">0</dd></div>
+        <div><dt>Throughput</dt><dd id="s-speed">—</dd></div>
+        <div><dt>Elapsed</dt><dd id="s-time">0s</dd></div>
+      </dl>
+      <div class="run-actions">
+        <button class="ghost" id="cancel" type="button" hidden>Stop</button>
+        <button class="ghost" id="again" type="button" hidden>New book</button>
+      </div>
+    </section>
+
+    <section class="outline" id="outline" hidden>
+      <div class="outline-head">
+        <h2>Outline review</h2>
+        <span class="hint">Nothing written yet</span>
+      </div>
+      <label class="field">
+        <span class="label">Title</span>
+        <input id="o-title" maxlength="120" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="label">Subtitle</span>
+        <input id="o-subtitle" maxlength="180" autocomplete="off">
+      </label>
+      <div id="o-chapters"></div>
+      <div class="outline-actions">
+        <button class="ghost" id="o-add" type="button">Add a chapter</button>
+        <button class="primary" id="o-approve" type="button">Write this outline</button>
+      </div>
+      <p class="hint" id="o-count">0 chapters</p>
+    </section>
+
+    <section class="toc" id="toc" hidden>
+      <h2>Contents</h2>
+      <ol id="toc-list"></ol>
+    </section>
+
+    <section class="report" id="report" hidden>
+      <h2>Style report</h2>
+      <div class="report-head">
+        <div class="score">
+          <span class="score-num" id="r-flags">0</span>
+          <span class="score-label">patterns left</span>
+        </div>
+        <div class="score">
+          <span class="score-num" id="r-fixed">0</span>
+          <span class="score-label">fixed by the editor</span>
+        </div>
+      </div>
+      <dl class="stats report-stats">
+        <div><dt>Reading ease</dt><dd id="r-ease">—</dd></div>
+        <div><dt>Grade level</dt><dd id="r-grade">—</dd></div>
+        <div><dt>Sentence length</dt><dd id="r-sentence">—</dd></div>
+        <div><dt>Adverbs / 100w</dt><dd id="r-adverbs">—</dd></div>
+      </dl>
+      <ul class="residue" id="r-residue"></ul>
+      <p class="hint" id="r-empty" hidden>No patterns detected in the finished book.</p>
+    </section>
+
+    <section class="export" id="export" hidden>
+      <h2>Export</h2>
+      <section class="layout-presets" aria-labelledby="layout-presets-title">
+        <h3 id="layout-presets-title">Ready-made layouts</h3>
+        <div class="layout-preset-controls">
+          <label class="mini" for="exp-layout-preset"><span>Choose a starting layout</span>
+            <select id="exp-layout-preset">
+              <option value="">Select a layout…</option>
+              <option value="classic">Classic book</option>
+              <option value="modern">Modern trade</option>
+              <option value="large-print">Large print</option>
+              <option value="manuscript">Manuscript review</option>
+              <option value="minimal">Minimal headings</option>
+            </select>
+          </label>
+          <button type="button" id="exp-apply-layout" disabled>Apply layout</button>
+        </div>
+        <p class="hint" id="exp-layout-description" aria-live="polite">Choose a preset for a ready-made starting point. You can adjust every setting below before exporting.</p>
+      </section>
+      <details class="export-options" open>
+        <summary>Page &amp; text layout</summary>
+        <div class="export-controls">
+          <label class="mini"><span>Page size</span>
+            <select id="exp-page-size">
+              <option value="a5" selected>A5 — compact book</option>
+              <option value="a4">A4</option>
+              <option value="letter">US Letter</option>
+            </select>
+          </label>
+          <label class="mini"><span>Margins</span>
+            <select id="exp-margins">
+              <option value="narrow">Narrow — more text</option>
+              <option value="normal" selected>Normal</option>
+              <option value="wide">Wide — more white space</option>
+            </select>
+          </label>
+          <label class="mini"><span>Division heading</span>
+            <select id="exp-chapter-heading">
+              <option value="chapter" selected>Chapter 1</option>
+              <option value="number">1.</option>
+              <option value="title">Title only</option>
+              <option value="none">No heading — hide title and number</option>
+            </select>
+            <span class="hint">No heading hides the division title in the body; contents/navigation may still list it.</span>
+          </label>
+          <label class="mini"><span>Body text size</span>
+            <select id="exp-font-size">
+              <option value="9">9 pt — small</option>
+              <option value="10" selected>10 pt</option>
+              <option value="11">11 pt</option>
+              <option value="12">12 pt — large</option>
+              <option value="13">13 pt</option>
+              <option value="14">14 pt — extra large</option>
+            </select>
+          </label>
+          <label class="mini"><span>Line spacing</span>
+            <select id="exp-line-spacing">
+              <option value="compact">Compact</option>
+              <option value="normal" selected>Normal</option>
+              <option value="airy">Airy</option>
+            </select>
+          </label>
+          <label class="mini"><span>Paragraphs</span>
+            <select id="exp-paragraph-style">
+              <option value="indent" selected>First-line indent</option>
+              <option value="space">Space between paragraphs</option>
+            </select>
+          </label>
+          <label class="mini"><span>Text alignment</span>
+            <select id="exp-alignment">
+              <option value="justify" selected>Justified</option>
+              <option value="left">Left aligned</option>
+            </select>
+          </label>
+        </div>
+        <div class="export-controls">
+          <label class="mini"><span>Export title</span><input id="exp-title" maxlength="120" placeholder="Use outline title"></label>
+          <label class="mini"><span>Export subtitle</span><input id="exp-subtitle" maxlength="180" placeholder="Use outline subtitle"></label>
+          <label class="mini"><span>Cover line / byline</span><input id="exp-cover-kicker" maxlength="120" value="A BOOK WRITTEN WITH BOOKWRIGHT" placeholder="Blank hides this line"></label>
+          <label class="mini"><span>Cover text alignment</span><select id="exp-cover-align"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+          <label class="mini"><span>Cover vertical position</span><select id="exp-cover-position"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select></label>
+          <label class="mini"><span>Division name</span>
+            <select id="exp-unit-label"><option value="chapter">Chapter</option><option value="section">Section</option><option value="essay">Essay</option><option value="entry">Entry</option></select>
+          </label>
+          <label class="mini"><span>Group name</span>
+            <select id="exp-part-label"><option value="part">Part</option><option value="book">Book</option><option value="volume">Volume</option></select>
+          </label>
+          <label class="mini"><span>Group title alignment</span><select id="exp-part-align"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+          <label class="mini"><span>Group title position</span><select id="exp-part-position"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select></label>
+          <label class="mini"><span>Division title alignment</span><select id="exp-chapter-align"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+          <label class="mini"><span>Division title position</span><select id="exp-chapter-position"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select></label>
+          <label class="mini"><span>PDF header left</span><input id="exp-header-left" maxlength="80" placeholder="Book title"></label>
+          <label class="mini"><span>PDF header right</span><input id="exp-header-right" maxlength="80" value="BOOKWRIGHT"></label>
+        </div>
+        <p class="hint">Title and subtitle fields start with your outline values; edit them here for this export. A blank title keeps the outline title, while a blank subtitle removes it.</p>
+        <label class="mini export-imprint"><span>End imprint text</span>
+          <textarea id="exp-end-imprint" rows="4" maxlength="1500">Generated on {date} by Bookwright: an architect model planned the book, a writer model drafted each {unit} against a running continuity bible, and an editor model summarised what had been written. Text is model output; verify any claim before relying on it.</textarea>
+          <small>Tokens: {date}, {title}, {subtitle}, {unit}, {group}. Clear to omit the imprint.</small>
+        </label>
+        <div class="export-checks">
+          <label><input type="checkbox" id="exp-chapter-break" checked> Start each major division on a new page</label>
+          <label><input type="checkbox" id="exp-clean-scaffolding" checked> Remove short leaked writing instructions</label>
+          <label><input type="checkbox" id="exp-show-part-heading" checked> Show part headings (number and title)</label>
+          <label><input type="checkbox" id="exp-show-part-subtitle" checked> Show part subtitles (summaries)</label>
+          <label><input type="checkbox" id="exp-show-chapter-title" checked> Show chapter titles</label>
+          <label><input type="checkbox" id="exp-show-chapter-subtitle"> Show chapter subtitles (purpose)</label>
+          <label><input type="checkbox" id="exp-title-page" checked> Include title page (HTML, EPUB, PDF)</label>
+          <label><input type="checkbox" id="exp-subtitle-visible" checked> Show subtitle</label>
+          <label><input type="checkbox" id="exp-running-matter" checked> PDF running header</label>
+          <label><input type="checkbox" id="exp-page-numbers" checked> PDF page numbers</label>
+        </div>
+        <p class="hint">Title, subtitle, heading visibility, cover line, positioning, end imprint, and instruction cleanup are export-time only; the saved draft is unchanged. Part subtitles use the outline summary; chapter subtitles use the chapter purpose. Hidden chapter titles are replaced with generic chapter numbers in contents/navigation. Division vertical placement applies when each division starts on a new page. PDF running headers and page numbers are separate.</p>
+      </details>
+      <div class="export-grid" id="export-grid"></div>
+      <p class="hint" id="export-hint">Files build on demand from what has been written.</p>
+    </section>
+
+    <footer class="panel-foot">
+      <p>Architect plans · Writer drafts · Editor keeps continuity · Composer exports.</p>
+    </footer>
+  </aside>
+
+  <section class="reader" id="reader" aria-live="polite">
+    <div class="empty" id="empty">
+      <div class="empty-inner">
+        <p class="kicker">A book in one sentence</p>
+        <h2>Give it a subject.<br>Watch a book assemble itself.</h2>
+        <p class="lede">Bookwright stages the work the way an author does: one model designs the
+          argument, another writes each chapter against a running bible of what came before,
+          and a third keeps the book from contradicting itself. Then it typesets.</p>
+        <ul class="flow">
+          <li><b>01</b> Architect — parts, chapters, beats</li>
+          <li><b>02</b> Writer — chapters, streamed as they land</li>
+          <li><b>03</b> Editor — summaries + glossary for continuity</li>
+          <li><b>04</b> Composer — Markdown, HTML, EPUB, PDF</li>
+        </ul>
+        <p class="try">Try: <button class="link" data-topic="why cities keep building systems nobody can maintain">maintenance debt in cities</button> ·
+          <button class="link" data-topic="the quiet economics of second-hand markets">second-hand markets</button> ·
+          <button class="link" data-topic="how expertise turns into blindness">the cost of expertise</button></p>
+      </div>
+    </div>
+    <article class="book" id="book" hidden></article>
+  </section>
+</main>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="modal" id="key-modal" role="dialog" aria-modal="true" aria-labelledby="key-title" hidden>
+  <h2 id="key-title">Your Groq API key</h2>
+  <p class="modal-copy">Bookwright reads the key from the server environment
+    (<code>GROQ_API_KEY</code>) when it can. Paste one here to use your own quota — it is kept in
+    this tab's session storage only, sent per request, and never written to disk.</p>
+  <input id="key-input" type="password" placeholder="gsk_..." spellcheck="false" autocomplete="off">
+  <p class="hint" id="key-hint">Leave empty to stay in demo mode.</p>
+  <div class="modal-actions">
+    <button class="ghost" id="key-clear" type="button">Clear</button>
+    <button class="primary" id="key-save" type="button">Use this key</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="alert" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
