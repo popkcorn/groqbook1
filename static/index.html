@@ -28,6 +28,25 @@
 <main class="shell">
   <aside class="panel" id="panel">
     <form id="brief" autocomplete="off">
+      <section class="generation-recipes" aria-labelledby="generation-recipes-title">
+        <h2 id="generation-recipes-title">Generation recipes</h2>
+        <div class="generation-recipe-controls">
+          <label class="mini" for="generation-recipe"><span>Choose a book starting point</span>
+            <select id="generation-recipe">
+              <option value="">Select a recipe…</option>
+              <option value="explainer">Clear explainer</option>
+              <option value="narrative">Narrative nonfiction</option>
+              <option value="field-guide">Practical field guide</option>
+              <option value="research">Research monograph</option>
+              <option value="investigative">Investigative journalism</option>
+              <option value="executive">Executive briefing</option>
+            </select>
+          </label>
+          <button type="button" id="apply-generation-recipe" disabled>Apply recipe</button>
+        </div>
+        <p class="hint" id="generation-recipe-description" aria-live="polite">Recipes set a starting audience, voice, length, structure, and editorial profile. Your topic, notes, sources, and voice sample stay yours.</p>
+      </section>
+
       <label class="field">
         <span class="label">What is the book about?</span>
         <textarea id="topic" rows="3" maxlength="240" required

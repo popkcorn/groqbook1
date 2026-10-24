@@ -546,23 +546,38 @@ textarea:focus, select:focus, input:focus {
 .toggle.muted .t-desc { text-decoration: line-through; }
 
 /* ------------------------------------------------------------- export layout */
-.layout-presets {
+.layout-presets, .generation-recipes {
   margin: .55rem 0 .8rem; padding: .7rem .75rem;
   border: 1px solid var(--rule-strong); border-radius: 3px; background: #fffdf8;
 }
-.layout-presets h3 { margin: 0 0 .55rem; font-size: .78rem; color: var(--ink-soft); }
-.layout-preset-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .55rem; align-items: end; }
-.layout-preset-controls .mini { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
-.layout-preset-controls .mini span { color: var(--ink-soft); font-size: .68rem; }
-.layout-preset-controls select { width: 100%; min-width: 0; font-size: .72rem; }
-.layout-preset-controls button {
+.layout-presets h3, .generation-recipes h2 {
+  margin: 0 0 .55rem; font-size: .78rem; color: var(--ink-soft);
+}
+.layout-preset-controls, .generation-recipe-controls {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .55rem; align-items: end;
+}
+.layout-preset-controls .mini, .generation-recipe-controls .mini {
+  display: flex; flex-direction: column; gap: .25rem; min-width: 0;
+}
+.layout-preset-controls .mini span, .generation-recipe-controls .mini span {
+  color: var(--ink-soft); font-size: .68rem;
+}
+.layout-preset-controls select, .generation-recipe-controls select {
+  width: 100%; min-width: 0; font-size: .72rem;
+}
+.layout-preset-controls button, .generation-recipe-controls button {
   min-height: 2rem; padding: .4rem .65rem; border: 1px solid var(--rule-strong);
   border-radius: 3px; background: #fff; color: var(--ink-soft); font: inherit;
   font-size: .72rem; cursor: pointer;
 }
-.layout-preset-controls button:hover:not(:disabled) { border-color: var(--ink); background: var(--paper); }
-.layout-preset-controls button:disabled { opacity: .45; cursor: not-allowed; }
-.layout-presets .hint { margin: .5rem 0 0; font-size: .67rem; }
+.layout-preset-controls button:hover:not(:disabled), .generation-recipe-controls button:hover:not(:disabled) {
+  border-color: var(--ink); background: var(--paper);
+}
+.layout-preset-controls button:disabled, .generation-recipe-controls button:disabled {
+  opacity: .45; cursor: not-allowed;
+}
+.layout-presets .hint, .generation-recipes .hint { margin: .5rem 0 0; font-size: .67rem; }
+.generation-recipes { margin-top: 0; margin-bottom: 1rem; }
 .export-options {
   margin: .6rem 0 .8rem; padding: .65rem .7rem;
   border: 1px solid var(--rule); border-radius: 3px; background: var(--paper);

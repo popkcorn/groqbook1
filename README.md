@@ -220,6 +220,15 @@ paragraph; the label describes its role, while the word target controls length.
 The underlying plan/API keeps the existing `parts` and `chapters` fields for
 compatibility.
 
+### Generation recipes
+
+The browser offers one-click starting recipes for a clear explainer, narrative
+nonfiction, practical field guide, research monograph, investigative journalism,
+and executive briefing. A recipe fills audience, tone, length, division labels,
+heading density, point of view, outline-review choice, and editorial profile.
+Authors can adjust every field afterward. Recipes never replace the topic,
+research notes, sources, or voice sample.
+
 ### Style controls — getting away from "AI voice"
 
 Twenty-four switches, each injecting a precise instruction into every chapter prompt

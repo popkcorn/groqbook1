@@ -40,6 +40,51 @@
     pdf: ["PDF", ".pdf"],
   };
 
+  const BOOK_RECIPES = {
+    explainer: {
+      name: "Clear explainer",
+      description: "A concise, accessible argument for curious general readers, with a clear chapter structure.",
+      audience: "Curious general reader", tone: "clear", length: "standard",
+      unit: "chapter", group: "part", groups: 3, headings: "standard", pov: "auto",
+      profile: "plain", review: true, stylist: true,
+    },
+    narrative: {
+      name: "Narrative nonfiction",
+      description: "A longer story-led book built around vivid scenes, people, and forward movement.",
+      audience: "Curious general reader", tone: "narrative", length: "deep",
+      unit: "chapter", group: "part", groups: 3, headings: "few", pov: "third",
+      profile: "literary", review: true, stylist: true,
+    },
+    "field-guide": {
+      name: "Practical field guide",
+      description: "A hands-on guide for practitioners, organized into detailed, actionable sections.",
+      audience: "Practitioner", tone: "technical", length: "deep",
+      unit: "section", group: "part", groups: 3, headings: "detailed", pov: "you",
+      profile: "plain", review: true, stylist: true,
+    },
+    research: {
+      name: "Research monograph",
+      description: "A rigorous specialist book with careful qualifications, detailed structure, and outline review enabled.",
+      audience: "Specialist", tone: "rigorous", length: "deep",
+      unit: "chapter", group: "part", groups: 3, headings: "detailed", pov: "third",
+      profile: "academic", review: true, stylist: true,
+    },
+    investigative: {
+      name: "Investigative journalism",
+      description: "A reported, source-conscious narrative for general readers, arranged as a sequence of sections.",
+      audience: "Curious general reader", tone: "journalistic", length: "deep",
+      unit: "section", group: "part", groups: 3, headings: "standard", pov: "third",
+      profile: "journalistic", review: true, stylist: true,
+    },
+    executive: {
+      name: "Executive briefing",
+      description: "A short decision-focused book for leaders, with compact sections and minimal internal headings.",
+      audience: "Executive", tone: "editorial", length: "chapbook",
+      unit: "section", group: "book", groups: 2, headings: "few", pov: "third",
+      profile: "journalistic", review: true, stylist: true,
+    },
+  };
+
   function pluralLabel(word) {
     if (word.endsWith("y") && !/[aeiou]y$/.test(word)) return `${word.slice(0, -1)}ies`;
     if (/(s|x|ch|sh)$/.test(word)) return `${word}es`;
@@ -525,6 +570,24 @@
 
     applyPovConflicts();
     updateEstimate(presets);
+
+    const recipeSelect = $("#generation-recipe");
+    const recipeButton = $("#apply-generation-recipe");
+    const recipeDescription = $("#generation-recipe-description");
+    const updateRecipeDescription = (applied = false) => {
+      const recipe = BOOK_RECIPES[recipeSelect.value];
+      recipeButton.disabled = !recipe;
+      recipeDescription.textContent = recipe
+        ? `${recipe.description}${applied ? " Applied. Fine-tune any field before writing." : " Apply it to fill the starting options."}`
+        : "Recipes set a starting audience, voice, length, structure, and editorial profile. Your topic, notes, sources, and voice sample stay yours.";
+    };
+    recipeSelect.addEventListener("change", () => updateRecipeDescription());
+    recipeButton.addEventListener("click", () => {
+      const recipeId = recipeSelect.value;
+      if (!BOOK_RECIPES[recipeId]) return;
+      applyBookRecipe(recipeId, presets);
+      updateRecipeDescription(true);
+    });
   }
 
   // A rule that forbids the person the author just chose would fight the writer
@@ -597,6 +660,46 @@
     }
     applyPovConflicts();
     paintStyleCount();
+    updateEstimate(presets);
+  }
+
+  function applyBookRecipe(recipeId, presets) {
+    const recipe = BOOK_RECIPES[recipeId];
+    if (!recipe) return;
+
+    $("#audience").value = recipe.audience;
+    $("#tone").value = recipe.tone;
+    $("#tone").dispatchEvent(new Event("change", { bubbles: true }));
+
+    const lengthChip = $(`#lengths .chip[data-id="${recipe.length}"]`);
+    if (lengthChip) lengthChip.click();
+    $("#unit-label").value = recipe.unit;
+    $("#unit-label").dispatchEvent(new Event("change", { bubbles: true }));
+    $("#part-label").value = recipe.group;
+    $("#part-label").dispatchEvent(new Event("change", { bubbles: true }));
+    $("#group-count").value = String(recipe.groups);
+    $("#group-count").dispatchEvent(new Event("change", { bubbles: true }));
+    $("#subheading-style").value = recipe.headings;
+    $("#pov").value = recipe.pov;
+    $("#pov").dispatchEvent(new Event("change", { bubbles: true }));
+    $("#review-outline").checked = recipe.review;
+    $("#stylist-on").checked = recipe.stylist;
+    $("#stylist-on").dispatchEvent(new Event("change", { bubbles: true }));
+
+    const previousProfile = presets.profiles.find((profile) => profile.id === state.profile);
+    const extra = $("#extra-instructions");
+    if (previousProfile?.extra && extra.value.trim() === previousProfile.extra.trim()) {
+      extra.value = "";
+      $("#extra-count").textContent = "0";
+    }
+    const profile = presets.profiles.find((item) => item.id === recipe.profile);
+    if (profile) {
+      state.profile = profile.id;
+      $("#profiles").querySelectorAll(".profile-chip").forEach((chip) => {
+        chip.setAttribute("aria-checked", String(chip.dataset.id === profile.id));
+      });
+      applyProfile(profile, presets);
+    }
     updateEstimate(presets);
   }
 
