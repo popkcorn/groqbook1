@@ -443,7 +443,7 @@ readers may adapt it. Edit the end imprint or clear it entirely; its
 `{date}`, `{title}`, `{subtitle}`, `{unit}`, and `{group}` tokens are filled at
 export time. These changes do not rewrite the saved outline or prose.
 
-The panel also includes division/group labels, heading format (`Chapter 1`, `1.`, title only, or no body heading; contents/navigation may still list titles), page size, margins, body font size (9–14 pt), line spacing,
+The panel starts with ready-made layout presets: Classic book, Modern trade, Large print, Manuscript review, and Minimal headings. Applying one fills in the layout controls as a starting point; every setting remains editable, and the same chosen layout is used for Markdown, HTML, EPUB, and PDF. The panel also includes division/group labels, heading format (`Chapter 1`, `1.`, title only, or no body heading; contents/navigation may still list titles), page size, margins, body font size (9–14 pt), line spacing,
 paragraph indents versus spacing, body alignment, and a page break per major
 division. A checked export option removes short paragraphs or headings that clearly
 repeat a plan beat as a command; it edits only the exported copy, not the saved

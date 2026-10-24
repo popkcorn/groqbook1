@@ -1502,6 +1502,101 @@
     $("#s-time").textContent = "0s";
   }
 
+  // ------------------------------------------------------ export layout presets
+  const EXPORT_LAYOUT_PRESETS = {
+    classic: {
+      name: "Classic book",
+      description: "Compact print layout with traditional indented paragraphs, a centered cover, and clear part and chapter headings.",
+      values: {
+        "exp-page-size": "a5", "exp-margins": "normal", "exp-chapter-heading": "chapter",
+        "exp-font-size": "10", "exp-line-spacing": "normal", "exp-paragraph-style": "indent",
+        "exp-alignment": "justify", "exp-chapter-break": true, "exp-running-matter": true,
+        "exp-page-numbers": true, "exp-show-part-heading": true, "exp-show-part-subtitle": true,
+        "exp-show-chapter-title": true, "exp-show-chapter-subtitle": false, "exp-title-page": true,
+        "exp-subtitle-visible": true, "exp-cover-kicker": "A BOOK WRITTEN WITH BOOKWRIGHT",
+        "exp-cover-align": "center", "exp-cover-position": "middle", "exp-part-align": "center",
+        "exp-part-position": "middle", "exp-chapter-align": "left", "exp-chapter-position": "top",
+      },
+    },
+    modern: {
+      name: "Modern trade",
+      description: "A spacious contemporary layout with left-aligned text, paragraph spacing, and understated headings.",
+      values: {
+        "exp-page-size": "a5", "exp-margins": "wide", "exp-chapter-heading": "title",
+        "exp-font-size": "11", "exp-line-spacing": "airy", "exp-paragraph-style": "space",
+        "exp-alignment": "left", "exp-chapter-break": true, "exp-running-matter": true,
+        "exp-page-numbers": true, "exp-show-part-heading": true, "exp-show-part-subtitle": true,
+        "exp-show-chapter-title": true, "exp-show-chapter-subtitle": false, "exp-title-page": true,
+        "exp-subtitle-visible": true, "exp-cover-kicker": "",
+        "exp-cover-align": "left", "exp-cover-position": "middle", "exp-part-align": "left",
+        "exp-part-position": "middle", "exp-chapter-align": "left", "exp-chapter-position": "top",
+      },
+    },
+    "large-print": {
+      name: "Large print",
+      description: "Larger A4 pages, 14-point text, generous leading, and left alignment for easier reading.",
+      values: {
+        "exp-page-size": "a4", "exp-margins": "wide", "exp-chapter-heading": "chapter",
+        "exp-font-size": "14", "exp-line-spacing": "airy", "exp-paragraph-style": "space",
+        "exp-alignment": "left", "exp-chapter-break": true, "exp-running-matter": true,
+        "exp-page-numbers": true, "exp-show-part-heading": true, "exp-show-part-subtitle": true,
+        "exp-show-chapter-title": true, "exp-show-chapter-subtitle": false, "exp-title-page": true,
+        "exp-subtitle-visible": true, "exp-cover-kicker": "",
+        "exp-cover-align": "center", "exp-cover-position": "middle", "exp-part-align": "center",
+        "exp-part-position": "middle", "exp-chapter-align": "left", "exp-chapter-position": "top",
+      },
+    },
+    manuscript: {
+      name: "Manuscript review",
+      description: "US Letter pages with wide margins, 12-point airy text, page numbers, and chapter purposes visible for review.",
+      values: {
+        "exp-page-size": "letter", "exp-margins": "wide", "exp-chapter-heading": "chapter",
+        "exp-font-size": "12", "exp-line-spacing": "airy", "exp-paragraph-style": "space",
+        "exp-alignment": "left", "exp-chapter-break": true, "exp-running-matter": false,
+        "exp-page-numbers": true, "exp-show-part-heading": true, "exp-show-part-subtitle": true,
+        "exp-show-chapter-title": true, "exp-show-chapter-subtitle": true, "exp-title-page": false,
+        "exp-subtitle-visible": true, "exp-cover-kicker": "",
+        "exp-cover-align": "left", "exp-cover-position": "top", "exp-part-align": "left",
+        "exp-part-position": "top", "exp-chapter-align": "left", "exp-chapter-position": "top",
+      },
+    },
+    minimal: {
+      name: "Minimal headings",
+      description: "A clean reading copy without part or chapter titles in the body; contents keep generic navigation labels.",
+      values: {
+        "exp-page-size": "a5", "exp-margins": "normal", "exp-chapter-heading": "none",
+        "exp-font-size": "11", "exp-line-spacing": "normal", "exp-paragraph-style": "indent",
+        "exp-alignment": "justify", "exp-chapter-break": true, "exp-running-matter": true,
+        "exp-page-numbers": true, "exp-show-part-heading": false, "exp-show-part-subtitle": false,
+        "exp-show-chapter-title": false, "exp-show-chapter-subtitle": false, "exp-title-page": true,
+        "exp-subtitle-visible": true, "exp-cover-kicker": "",
+        "exp-cover-align": "center", "exp-cover-position": "middle", "exp-part-align": "center",
+        "exp-part-position": "middle", "exp-chapter-align": "left", "exp-chapter-position": "top",
+      },
+    },
+  };
+
+  function updateLayoutPresetDescription(applied = false) {
+    const preset = EXPORT_LAYOUT_PRESETS[$("#exp-layout-preset").value];
+    $("#exp-apply-layout").disabled = !preset;
+    $("#exp-layout-description").textContent = preset
+      ? `${preset.description}${applied ? " Applied. You can still fine-tune the options below." : " Select Apply layout to fill the export options."}`
+      : "Choose a preset for a ready-made starting point. You can adjust every setting below before exporting.";
+  }
+
+  $("#exp-layout-preset").addEventListener("change", () => updateLayoutPresetDescription());
+  $("#exp-apply-layout").addEventListener("click", () => {
+    const preset = EXPORT_LAYOUT_PRESETS[$("#exp-layout-preset").value];
+    if (!preset) return;
+    for (const [id, value] of Object.entries(preset.values)) {
+      const field = document.getElementById(id);
+      if (!field) continue;
+      if (field.type === "checkbox") field.checked = Boolean(value);
+      else field.value = value;
+    }
+    updateLayoutPresetDescription(true);
+  });
+
   // ---------------------------------------------------------------- export
   function updateExports() {
     const grid = $("#export-grid");

@@ -345,6 +345,23 @@
 
     <section class="export" id="export" hidden>
       <h2>Export</h2>
+      <section class="layout-presets" aria-labelledby="layout-presets-title">
+        <h3 id="layout-presets-title">Ready-made layouts</h3>
+        <div class="layout-preset-controls">
+          <label class="mini" for="exp-layout-preset"><span>Choose a starting layout</span>
+            <select id="exp-layout-preset">
+              <option value="">Select a layout…</option>
+              <option value="classic">Classic book</option>
+              <option value="modern">Modern trade</option>
+              <option value="large-print">Large print</option>
+              <option value="manuscript">Manuscript review</option>
+              <option value="minimal">Minimal headings</option>
+            </select>
+          </label>
+          <button type="button" id="exp-apply-layout" disabled>Apply layout</button>
+        </div>
+        <p class="hint" id="exp-layout-description" aria-live="polite">Choose a preset for a ready-made starting point. You can adjust every setting below before exporting.</p>
+      </section>
       <details class="export-options" open>
         <summary>Page &amp; text layout</summary>
         <div class="export-controls">
