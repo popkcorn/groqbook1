@@ -38,6 +38,8 @@
     html: ["HTML", ".html"],
     epub: ["EPUB", ".epub"],
     pdf: ["PDF", ".pdf"],
+    docx: ["Word", ".docx"],
+    xlsx: ["Excel", ".xlsx"],
   };
 
   const BOOK_RECIPES = {

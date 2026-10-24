@@ -1,8 +1,8 @@
 # Bookwright
 
 **A staged book-writing model.** Give it a sentence about a subject; it designs the argument,
-writes the chapters, keeps them from contradicting each other, and typesets the result as
-Markdown, HTML, EPUB or PDF.
+writes the chapters, keeps them from contradicting each other, and exports the result as
+Markdown, HTML, EPUB, PDF, an editable Word document, or a structured Excel workbook.
 
 Built as a successor to [Groqbook](README.groqbook.md) — the original one-file app in `main.py` —
 whose two hardcoded models were retired in August 2025. See [ANALYSIS.md](ANALYSIS.md) for what
@@ -17,7 +17,7 @@ topic ──▶ ARCHITECT ──▶ plan (parts, chapters, beats)
              └────────────────────────────────────────────────────┘
                               │
                               ▼
-                        COMPOSER ──▶ .md · .html · .epub · .pdf
+                        COMPOSER ──▶ .md · .html · .epub · .pdf · .docx · .xlsx
 ```
 
 ---
@@ -403,7 +403,7 @@ bookwright/
   mock.py        offline fixture provider
   jobs.py        job state, event fan-out, the wave-based pipeline, the de-AI stage
   style.py       pattern detectors, chunking, paragraph diff for the UI
-  exporters.py   Markdown · HTML · EPUB 3 · PDF
+  exporters.py   Markdown · HTML · EPUB 3 · PDF · Word · Excel
 server.py        FastAPI: JSON API, SSE stream, export endpoints
 static/          dependency-free front-end (no build step, no CDN)
 tests/           schema, pipeline, cancel, continuity, env, style, exports, UI-facing options
@@ -431,7 +431,9 @@ main.py          the original Groqbook app, unchanged, for reference
 | `POST` | `/api/books/{id}/chapters/{n}/undo-regeneration` | Restore the chapter version before its latest regeneration |
 | `POST` | `/api/books/{id}/outline` | Validate and approve an edited plan; resumes the parked writer |
 | `POST` | `/api/books/{id}/cancel` | Stop; keeps what was written |
-| `GET` | `/api/books/{id}/export/{md\|html\|epub\|pdf}` | Download |
+| `GET` | `/api/books/{id}/export/{md\|html\|epub\|pdf\|docx\|xlsx}` | Download |
+
+Word (`docx`) is an editable manuscript that follows the selected heading and page-layout controls. Excel (`xlsx`) is a workbook with Overview, Outline, and Chapter Drafts sheets; it preserves full planning data and prose for sorting/editing rather than typesetting a reading copy.
 
 ```bash
 curl -s -X POST localhost:8000/api/books -H 'content-type: application/json' \
@@ -447,18 +449,18 @@ subtitle, and cover line/byline (for example, `BOOKWRIGHT`), and choose whether
 the title page or subtitle appears. Set alignment (left/center/right) and vertical
 position (top/middle/bottom) independently for the cover, group openers, and
 division headings. Division vertical placement applies when each division starts
-on a new page. Vertical placement is most reliable in PDF and print HTML; EPUB
+on a new page. Vertical placement is most reliable in PDF, Word, and print HTML; EPUB
 readers may adapt it. Edit the end imprint or clear it entirely; its
 `{date}`, `{title}`, `{subtitle}`, `{unit}`, and `{group}` tokens are filled at
 export time. These changes do not rewrite the saved outline or prose.
 
-The panel starts with ready-made layout presets: Classic book, Modern trade, Large print, Manuscript review, and Minimal headings. Applying one fills in the layout controls as a starting point; every setting remains editable, and the same chosen layout is used for Markdown, HTML, EPUB, and PDF. The panel also includes division/group labels, heading format (`Chapter 1`, `1.`, title only, or no body heading; contents/navigation may still list titles), page size, margins, body font size (9–14 pt), line spacing,
+The panel starts with ready-made layout presets: Classic book, Modern trade, Large print, Manuscript review, and Minimal headings. Applying one fills in the layout controls as a starting point; every setting remains editable, and the same chosen layout is used for Markdown, HTML, EPUB, PDF, and Word. Excel is a structured workbook, not a typeset manuscript; it always keeps the full overview, outline, beats, terms, and chapter drafts regardless of manuscript heading-visibility settings. The panel also includes division/group labels, heading format (`Chapter 1`, `1.`, title only, or no body heading; contents/navigation may still list titles), page size, margins, body font size (9–14 pt), line spacing,
 paragraph indents versus spacing, body alignment, and a page break per major
 division. A checked export option removes short paragraphs or headings that clearly
 repeat a plan beat as a command; it edits only the exported copy, not the saved
 draft. Separate switches control part headings, part summaries, chapter titles,
 and chapter purposes (as chapter subtitles). Hidden chapter titles are replaced
-with generic chapter labels in contents/navigation. PDF running-header text (left
+with generic chapter labels in contents/navigation. PDF and Word running-header text (left
 and right) and page numbers are controlled independently. EPUB readers control pagination; Markdown keeps the heading structure
 and appends the imprint text.
 

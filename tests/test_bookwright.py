@@ -15,9 +15,11 @@ from bookwright.exporters import (
     ExportOptions,
     export,
     parse_markdown,
+    to_docx,
     to_epub,
     to_html,
     to_markdown,
+    to_xlsx,
 )
 from bookwright.jobs import BookSpec, Job, chunk_text, estimate, run_book
 from bookwright.llm import GroqProvider, Usage, _backoff
@@ -629,6 +631,63 @@ def test_epub_is_a_valid_archive(finished):
             assert f"OEBPS/{href}" in names or href.startswith("http")
 
 
+def test_word_export_is_editable_and_respects_manuscript_options(finished):
+    from docx import Document
+
+    plan, chapters = finished
+    options = ExportOptions(show_chapter_subtitle=True)
+    data, filename, content_type = export(plan, chapters, "docx", options=options)
+    document = Document(io.BytesIO(data))
+    paragraph_text = chr(10).join(paragraph.text for paragraph in document.paragraphs)
+    assert filename.endswith(".docx")
+    assert content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert plan.title in paragraph_text
+    assert plan.parts[0].title in paragraph_text
+    assert plan.parts[0].summary in paragraph_text
+    assert plan.chapters[0].title in paragraph_text
+    assert plan.chapters[0].purpose in paragraph_text
+    assert chapters[1]["text"].split()[0] in paragraph_text
+
+    from copy import deepcopy
+
+    hidden_plan = deepcopy(plan)
+    hidden_part = hidden_plan.parts[0]
+    hidden_part.title = "UNIQUE HIDDEN GROUP TITLE"
+    hidden_part.chapters[0].title = "UNIQUE HIDDEN DIVISION TITLE"
+    hidden = ExportOptions(
+        show_title_page=False, end_imprint="", chapter_heading="none",
+        show_part_heading=False, show_part_subtitle=False,
+        show_chapter_title=False, show_chapter_subtitle=False,
+    )
+    no_headings = Document(io.BytesIO(to_docx(hidden_plan, chapters, options=hidden)))
+    body_text = chr(10).join(paragraph.text for paragraph in no_headings.paragraphs)
+    assert "UNIQUE HIDDEN GROUP TITLE" not in body_text
+    assert "UNIQUE HIDDEN DIVISION TITLE" not in body_text
+
+
+def test_excel_export_is_a_structured_editable_workbook(finished):
+    from openpyxl import load_workbook
+
+    plan, chapters = finished
+    data, filename, content_type = export(plan, chapters, "xlsx")
+    workbook = load_workbook(io.BytesIO(data), data_only=False)
+    assert filename.endswith(".xlsx")
+    assert content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert workbook.sheetnames == ["Overview", "Outline", "Chapter Drafts"]
+    assert workbook["Overview"]["B2"].value == plan.title
+    assert workbook["Outline"]["E2"].value == plan.chapters[0].title
+    assert workbook["Outline"]["H2"].value == chr(10).join(
+        f"{i}. {beat}" for i, beat in enumerate(plan.chapters[0].beats, 1)
+    )
+    assert workbook["Chapter Drafts"]["G2"].value == chapters[1]["text"]
+    assert workbook["Outline"].freeze_panes == "A2"
+
+    formula_text = {**chapters, 1: {"text": "=SUM(1, 2)"}}
+    protected = load_workbook(io.BytesIO(to_xlsx(plan, formula_text)), data_only=False)
+    assert protected["Chapter Drafts"]["G2"].value == "=SUM(1, 2)"
+    assert protected["Chapter Drafts"]["G2"].data_type == "s"
+
+
 def test_unicode_hyphens_export_as_ascii_without_mutating_book(finished):
     plan, chapters = finished
     source = "A cul\u2011de\u2011sac. A red\u2010and\u2010white sign."
@@ -942,6 +1001,26 @@ def test_export_api_forwards_structure_and_title_overrides(finished, monkeypatch
     no_heading_article = no_heading.text.split('id="ch-1"', 1)[1].split("</article>", 1)[0]
     assert "ch-head" not in no_heading_article
 
+    from docx import Document
+    from openpyxl import load_workbook
+
+    word = TestClient(server.app).get(f"/api/books/{job.id}/export/docx")
+    assert word.status_code == 200
+    assert word.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert plan.title in chr(10).join(
+        paragraph.text for paragraph in Document(io.BytesIO(word.content)).paragraphs
+    )
+    excel = TestClient(server.app).get(f"/api/books/{job.id}/export/xlsx")
+    assert excel.status_code == 200
+    assert excel.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert load_workbook(io.BytesIO(excel.content)).sheetnames == [
+        "Overview", "Outline", "Chapter Drafts"
+    ]
+
     plan.parts[0].title = "API Hidden Part Heading"
     plan.parts[0].summary = "API Hidden Part Subtitle"
     plan.parts[0].chapters[0].title = "API Hidden Chapter Title"
@@ -1093,7 +1172,7 @@ def test_html_export_escapes_script(finished):
 def test_unknown_format_raises(finished):
     plan, chapters = finished
     with pytest.raises(ValueError):
-        export(plan, chapters, "docx")
+        export(plan, chapters, "pages")
 
 
 # --------------------------------------------------------------------------- #

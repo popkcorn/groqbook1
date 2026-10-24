@@ -35,6 +35,8 @@ REQUIRED = {
     "httpx": "httpx",
     "reportlab": "reportlab",
     "pydantic": "pydantic",
+    "docx": "python-docx",
+    "openpyxl": "openpyxl",
 }
 
 

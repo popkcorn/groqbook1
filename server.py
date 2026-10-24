@@ -37,7 +37,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 store = JobStore(capacity=24)
 MAX_RUNNING_JOBS = 3
-EXPORT_FORMATS = {"md", "html", "epub", "pdf"}
+EXPORT_FORMATS = {"md", "html", "epub", "pdf", "docx", "xlsx"}
 
 
 class BookRequest(BaseModel):

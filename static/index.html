@@ -269,7 +269,7 @@
           <h3>Export layout</h3>
           <dl>
             <dt>File format</dt>
-            <dd>Markdown is easy to edit, HTML is for browsers and printing, EPUB is for e-readers, and PDF preserves a fixed page layout.</dd>
+            <dd>Markdown is easy to edit, HTML is for browsers and printing, EPUB is for e-readers, PDF preserves a fixed page layout, and Word gives you an editable manuscript. Excel downloads a workbook with Overview, Outline, and Chapter Drafts sheets.</dd>
             <dt>Page size and margins</dt>
             <dd>Set the page dimensions and printable area; they change layout and page count, not the prose.</dd>
             <dt>Division heading</dt>
@@ -277,11 +277,11 @@
             <dt>Title, subtitle and cover line</dt>
             <dd>Edit the actual cover title/subtitle and the line above them (for example, “BOOKWRIGHT”). Clear the subtitle or cover line if you do not want one.</dd>
             <dt>Page positioning</dt>
-            <dd>Choose left, centered, or right alignment and top, middle, or bottom placement separately for the cover, group openers, and division headings. Vertical placement is most reliable in PDF and print HTML.</dd>
+            <dd>Choose left, centered, or right alignment and top, middle, or bottom placement separately for the cover, group openers, and division headings. Vertical placement is most reliable in PDF, Word, and print HTML.</dd>
             <dt>End imprint</dt>
-            <dd>Edit or clear the text at the very end of Markdown, HTML, EPUB, and PDF. Use {date}, {title}, {subtitle}, {unit}, and {group} for values filled in at export time.</dd>
-            <dt>PDF running header</dt>
-            <dd>Set the left and right running header text independently. Page numbers can be enabled separately.</dd>
+            <dd>Edit the end imprint for Markdown, HTML, EPUB, PDF, and Word. Excel stores it on the Overview sheet. Use {date}, {title}, {subtitle}, {unit}, and {group} for values filled in at export time.</dd>
+            <dt>Running headers and page numbers</dt>
+            <dd>PDF and Word support independent left and right running-header text. Page numbers can be enabled separately.</dd>
             <dt>Body size and line spacing</dt>
             <dd>Change the type size and vertical breathing room, affecting readability and pagination.</dd>
             <dt>Paragraphs and alignment</dt>
@@ -468,15 +468,15 @@
           <label><input type="checkbox" id="exp-show-part-subtitle" checked> Show part subtitles (summaries)</label>
           <label><input type="checkbox" id="exp-show-chapter-title" checked> Show chapter titles</label>
           <label><input type="checkbox" id="exp-show-chapter-subtitle"> Show chapter subtitles (purpose)</label>
-          <label><input type="checkbox" id="exp-title-page" checked> Include title page (HTML, EPUB, PDF)</label>
+          <label><input type="checkbox" id="exp-title-page" checked> Include title page (HTML, EPUB, PDF, Word)</label>
           <label><input type="checkbox" id="exp-subtitle-visible" checked> Show subtitle</label>
-          <label><input type="checkbox" id="exp-running-matter" checked> PDF running header</label>
-          <label><input type="checkbox" id="exp-page-numbers" checked> PDF page numbers</label>
+          <label><input type="checkbox" id="exp-running-matter" checked> PDF and Word running header</label>
+          <label><input type="checkbox" id="exp-page-numbers" checked> PDF and Word page numbers</label>
         </div>
-        <p class="hint">Title, subtitle, heading visibility, cover line, positioning, end imprint, and instruction cleanup are export-time only; the saved draft is unchanged. Part subtitles use the outline summary; chapter subtitles use the chapter purpose. Hidden chapter titles are replaced with generic chapter numbers in contents/navigation. Division vertical placement applies when each division starts on a new page. PDF running headers and page numbers are separate.</p>
+        <p class="hint">Title, subtitle, heading visibility, cover line, positioning, end imprint, and instruction cleanup are export-time only; the saved draft is unchanged. Part subtitles use the outline summary; chapter subtitles use the chapter purpose. Hidden chapter titles are replaced with generic chapter numbers in contents/navigation. Division vertical placement applies when each division starts on a new page. PDF and Word running headers and page numbers are separate.</p>
       </details>
       <div class="export-grid" id="export-grid"></div>
-      <p class="hint" id="export-hint">Files build on demand from what has been written.</p>
+      <p class="hint" id="export-hint">Files build on demand. Word is an editable manuscript; Excel contains the book overview, outline, and chapter drafts.</p>
     </section>
 
     <footer class="panel-foot">
@@ -496,7 +496,7 @@
           <li><b>01</b> Architect — parts, chapters, beats</li>
           <li><b>02</b> Writer — chapters, streamed as they land</li>
           <li><b>03</b> Editor — summaries + glossary for continuity</li>
-          <li><b>04</b> Composer — Markdown, HTML, EPUB, PDF</li>
+          <li><b>04</b> Composer — Markdown, HTML, EPUB, PDF, Word, Excel</li>
         </ul>
         <p class="try">Try: <button class="link" data-topic="why cities keep building systems nobody can maintain">maintenance debt in cities</button> ·
           <button class="link" data-topic="the quiet economics of second-hand markets">second-hand markets</button> ·

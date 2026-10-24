@@ -1,4 +1,4 @@
-"""Export: Markdown, HTML (print-ready), EPUB 3 and PDF.
+"""Export: Markdown, HTML (print-ready), EPUB 3, PDF, Word, and Excel.
 
 The PDF path deliberately avoids WeasyPrint/md2pdf — those need Pango/Cairo and
 a pinned wrapper API, the exact combination that broke in the original app.
@@ -1163,6 +1163,380 @@ def to_pdf(
     return buffer.getvalue()
 
 
+
+def _add_docx_inline(paragraph, text: str) -> None:
+    """Preserve the small inline Markdown subset supported by other exporters."""
+    pattern = re.compile(r"(\*\*.+?\*\*|\*[^*\n]+\*|`[^`\n]+`)")
+    cursor = 0
+    for match in pattern.finditer(text):
+        if match.start() > cursor:
+            paragraph.add_run(text[cursor:match.start()])
+        token = match.group(0)
+        if token.startswith("**"):
+            run = paragraph.add_run(token[2:-2])
+            run.bold = True
+        elif token.startswith("*"):
+            run = paragraph.add_run(token[1:-1])
+            run.italic = True
+        else:
+            run = paragraph.add_run(token[1:-1])
+            run.font.name = "Courier New"
+        cursor = match.end()
+    if cursor < len(text):
+        paragraph.add_run(text[cursor:])
+
+
+def to_docx(
+    plan: Plan, chapters: dict[int, dict], *, options: ExportOptions | None = None
+) -> bytes:
+    """Build an editable Word manuscript with the requested heading visibility."""
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Inches, Mm, Pt, RGBColor
+
+    options = options or DEFAULT_EXPORT_OPTIONS
+    plan, chapters = _normalized_export_inputs(
+        plan, chapters, clean_scaffolding=options.clean_scaffolding
+    )
+    document = Document()
+    title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
+    document.core_properties.title = title
+    document.core_properties.subject = subtitle
+    document.core_properties.author = "Bookwright"
+
+    dimensions_mm = {"a5": (148, 210), "a4": (210, 297), "letter": (215.9, 279.4)}
+    page_width_mm, page_height_mm = dimensions_mm[options.page_size]
+    margin_x, margin_top, margin_bottom = PAGE_MARGINS[options.margins]
+    section = document.sections[0]
+    section.page_width, section.page_height = Mm(page_width_mm), Mm(page_height_mm)
+    section.left_margin = section.right_margin = Mm(margin_x)
+    section.top_margin, section.bottom_margin = Mm(margin_top), Mm(margin_bottom)
+    content_height_mm = page_height_mm - margin_top - margin_bottom
+
+    def vertical_space(fraction: float):
+        return Pt(content_height_mm * fraction * 72 / 25.4)
+
+    normal = document.styles["Normal"]
+    normal.font.name = "Georgia"
+    normal.font.size = Pt(options.body_font_size)
+    normal.font.color.rgb = RGBColor(30, 27, 24)
+    normal.paragraph_format.line_spacing = LINE_SPACING[options.line_spacing]
+    normal.paragraph_format.space_after = Pt(
+        options.body_font_size * 0.75 if options.paragraph_style == "space" else 0
+    )
+    normal.paragraph_format.first_line_indent = (
+        Mm(4.2) if options.paragraph_style == "indent" else None
+    )
+    normal.paragraph_format.alignment = (
+        WD_ALIGN_PARAGRAPH.JUSTIFY if options.alignment == "justify" else WD_ALIGN_PARAGRAPH.LEFT
+    )
+    for style_name, size, color in (
+        ("Title", 28, "17130F"),
+        ("Heading 1", max(17, options.body_font_size * 1.5), "17130F"),
+        ("Heading 2", max(13, options.body_font_size * 1.2), "3B3128"),
+        ("Heading 3", max(11, options.body_font_size * 1.05), "3B3128"),
+    ):
+        style = document.styles[style_name]
+        style.font.name = "Arial"
+        style.font.size = Pt(size)
+        style.font.bold = style_name != "Title"
+        style.font.color.rgb = RGBColor.from_string(color)
+        style.paragraph_format.keep_with_next = True
+
+    alignment = {
+        "left": WD_ALIGN_PARAGRAPH.LEFT,
+        "center": WD_ALIGN_PARAGRAPH.CENTER,
+        "right": WD_ALIGN_PARAGRAPH.RIGHT,
+    }
+    content_width = max(1, page_width_mm - 2 * margin_x) / 25.4
+    if options.running_matter:
+        header = section.header.paragraphs[0]
+        header.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        header.paragraph_format.tab_stops.add_tab_stop(Inches(content_width), WD_TAB_ALIGNMENT.RIGHT)
+        header.add_run((options.header_left.strip() or title).upper())
+        if options.header_right.strip():
+            header.add_run("\t" + options.header_right.strip().upper())
+        for run in header.runs:
+            run.font.name = "Arial"
+            run.font.size = Pt(7)
+            run.font.color.rgb = RGBColor(138, 125, 108)
+    if options.page_numbers:
+        footer = section.footer.paragraphs[0]
+        footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        field = OxmlElement("w:fldSimple")
+        field.set(qn("w:instr"), "PAGE")
+        footer._p.append(field)
+
+    has_content = False
+    break_pending = False
+    if options.show_title_page:
+        cover_alignment = alignment[options.cover_alignment]
+        cover_offset = {"top": 0.15, "middle": 0.30, "bottom": 0.42}[options.cover_position]
+        cover_kicker = DEFAULT_COVER_KICKER if options.cover_kicker is None else options.cover_kicker
+        spacer = document.add_paragraph()
+        spacer.paragraph_format.space_before = vertical_space(cover_offset)
+        spacer.paragraph_format.line_spacing = Pt(1)
+        spacer.paragraph_format.space_after = Pt(0)
+        if cover_kicker.strip():
+            p = document.add_paragraph()
+            p.alignment = cover_alignment
+            run = p.add_run(cover_kicker.strip().upper())
+            run.font.name, run.font.size = "Arial", Pt(8)
+            run.font.color.rgb = RGBColor(107, 95, 82)
+        p = document.add_paragraph(style="Title")
+        p.alignment = cover_alignment
+        p.add_run(title)
+        if options.show_subtitle and subtitle:
+            p = document.add_paragraph()
+            p.alignment = cover_alignment
+            run = p.add_run(subtitle)
+            run.italic = True
+            run.font.size = Pt(12)
+            run.font.color.rgb = RGBColor(107, 95, 82)
+        p = document.add_paragraph()
+        p.alignment = cover_alignment
+        run = p.add_run(f"{plan.audience} · {len(plan.chapters)} {_plural(options.unit_label)}")
+        run.font.size = Pt(8)
+        run.font.color.rgb = RGBColor(107, 95, 82)
+        if plan.thesis:
+            p = document.add_paragraph()
+            p.paragraph_format.space_before = Pt(24)
+            p.alignment = cover_alignment
+            run = p.add_run(plan.thesis)
+            run.italic = True
+            run.font.size = Pt(10)
+        document.add_page_break()
+        has_content = True
+        break_pending = True
+
+    for part in plan.parts:
+        has_part_page = options.show_part_heading or (options.show_part_subtitle and bool(part.summary))
+        if has_part_page:
+            if has_content and not break_pending:
+                document.add_page_break()
+            if options.show_part_heading:
+                p = document.add_paragraph(style="Heading 1")
+                p.alignment = alignment[options.part_alignment]
+                position = {"top": 0.15, "middle": 0.30, "bottom": 0.42}[options.part_position]
+                p.paragraph_format.space_before = vertical_space(position)
+                _add_docx_inline(p, f"{options.part_label.title()} {part.index}: {part.title}")
+            if options.show_part_subtitle and part.summary:
+                p = document.add_paragraph()
+                p.alignment = alignment[options.part_alignment]
+                if not options.show_part_heading:
+                    p.paragraph_format.space_before = vertical_space(
+                        {"top": 0.15, "middle": 0.30, "bottom": 0.42}[options.part_position]
+                    )
+                run = p.add_run(part.summary)
+                run.italic = True
+                run.font.color.rgb = RGBColor(107, 95, 82)
+            has_content = True
+            document.add_page_break()
+            break_pending = True
+
+        for chapter in part.chapters:
+            if options.chapter_new_page and has_content and not break_pending:
+                document.add_page_break()
+                break_pending = True
+            chapter_starts_page = not has_content or break_pending
+            _, _, heading = _chapter_heading(chapter, options)
+            position = (
+                {"top": 0, "middle": 0.25, "bottom": 0.40}[options.chapter_position]
+                if chapter_starts_page
+                else 0
+            )
+            if heading:
+                p = document.add_paragraph(style="Heading 1")
+                p.alignment = alignment[options.chapter_alignment]
+                p.paragraph_format.space_before = vertical_space(position)
+                _add_docx_inline(p, heading)
+            if options.show_chapter_subtitle and chapter.purpose:
+                p = document.add_paragraph()
+                p.alignment = alignment[options.chapter_alignment]
+                if not heading:
+                    p.paragraph_format.space_before = vertical_space(position)
+                run = p.add_run(chapter.purpose)
+                run.italic = True
+                run.font.color.rgb = RGBColor(107, 95, 82)
+            for block in parse_markdown((chapters.get(chapter.index, {}).get("text") or "").strip()):
+                if block.type == "h":
+                    level = min(max(block.level or 2, 2), 3)
+                    p = document.add_paragraph(style=f"Heading {level}")
+                    _add_docx_inline(p, block.text)
+                elif block.type == "p":
+                    _add_docx_inline(document.add_paragraph(), block.text)
+                elif block.type == "ul":
+                    for item in block.items or []:
+                        p = document.add_paragraph(style="List Bullet")
+                        p.paragraph_format.first_line_indent = None
+                        _add_docx_inline(p, item)
+                elif block.type == "quote":
+                    p = document.add_paragraph(style="Quote")
+                    p.paragraph_format.left_indent = Mm(6)
+                    for run in p.runs:
+                        run.italic = True
+                    _add_docx_inline(p, block.text)
+                elif block.type == "code":
+                    p = document.add_paragraph()
+                    p.paragraph_format.left_indent = Mm(5)
+                    run = p.add_run(block.text)
+                    run.font.name = "Courier New"
+                    run.font.size = Pt(max(8, options.body_font_size - 1))
+            has_content = True
+            break_pending = False
+
+    stamp = datetime.now(UTC).strftime("%d %B %Y")
+    imprint = _end_imprint(options, stamp=stamp, title=title, subtitle=subtitle)
+    if imprint:
+        if has_content:
+            document.add_page_break()
+        p = document.add_paragraph(imprint)
+        p.paragraph_format.first_line_indent = None
+        p.paragraph_format.space_before = Pt(20)
+        p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        for run in p.runs:
+            run.font.size = Pt(9)
+            run.font.color.rgb = RGBColor(107, 95, 82)
+
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _set_excel_text(cell, value: object) -> None:
+    """Write untrusted book text as a literal string, never as an Excel formula."""
+    text = "" if value is None else str(value)
+    if len(text) > 32_767:
+        text = text[:32_700] + "… [cell text truncated at Excel's 32,767 character limit]"
+    cell.value = text
+    cell.data_type = "s"
+    cell.number_format = "@"
+
+
+def to_xlsx(
+    plan: Plan, chapters: dict[int, dict], *, options: ExportOptions | None = None
+) -> bytes:
+    """Build an editable workbook: overview, structured outline, and chapter drafts."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    options = options or DEFAULT_EXPORT_OPTIONS
+    plan, chapters = _normalized_export_inputs(
+        plan, chapters, clean_scaffolding=options.clean_scaffolding
+    )
+    title, subtitle = _display_title(plan, options), _display_subtitle(plan, options)
+    workbook = Workbook()
+    overview = workbook.active
+    overview.title = "Overview"
+    outline = workbook.create_sheet("Outline")
+    drafts = workbook.create_sheet("Chapter Drafts")
+    workbook.properties.title = title
+    workbook.properties.subject = subtitle
+    workbook.properties.creator = "Bookwright"
+
+    header_fill = PatternFill("solid", fgColor="332B24")
+    header_font = Font(color="FFFFFF", bold=True)
+    body_alignment = Alignment(vertical="top", wrap_text=True)
+
+    def write_row(sheet, row_index: int, values, *, header: bool = False) -> None:
+        for column, value in enumerate(values, 1):
+            cell = sheet.cell(row=row_index, column=column)
+            if isinstance(value, str) or value is None:
+                _set_excel_text(cell, value)
+            else:
+                cell.value = value
+            cell.alignment = body_alignment
+            if header:
+                cell.fill = header_fill
+                cell.font = header_font
+
+    exported_at = datetime.now(UTC)
+    imprint = _end_imprint(
+        options,
+        stamp=exported_at.strftime("%d %B %Y"),
+        title=title,
+        subtitle=subtitle,
+    )
+    overview_rows = [
+        ("Book title", title),
+        ("Subtitle", subtitle),
+        ("Thesis", plan.thesis),
+        ("Audience", plan.audience),
+        ("Voice", plan.voice),
+        ("Groups", len(plan.parts)),
+        ("Divisions", len(plan.chapters)),
+        ("Target words", sum(chapter.words for chapter in plan.chapters)),
+        ("End imprint", imprint),
+        ("Exported", exported_at.strftime("%Y-%m-%d %H:%M UTC")),
+    ]
+    write_row(overview, 1, ("Book information", "Value"), header=True)
+    for row_index, row in enumerate(overview_rows, 2):
+        write_row(overview, row_index, row)
+    overview.column_dimensions["A"].width = 22
+    overview.column_dimensions["B"].width = 90
+    overview.freeze_panes = "A2"
+
+    outline_headers = (
+        "Group #", "Group title", "Group subtitle / summary", "Division #",
+        "Division title", "Division subtitle / purpose", "Target words", "Beats", "Terms",
+    )
+    write_row(outline, 1, outline_headers, header=True)
+    row_index = 2
+    for part in plan.parts:
+        for chapter in part.chapters:
+            beats = chr(10).join(
+                f"{number}. {beat}" for number, beat in enumerate(chapter.beats, 1)
+            )
+            terms = chr(10).join(chapter.terms)
+            write_row(outline, row_index, (
+                part.index, part.title, part.summary, chapter.index, chapter.title,
+                chapter.purpose, chapter.words, beats, terms,
+            ))
+            row_index += 1
+    outline.freeze_panes = "A2"
+    outline.auto_filter.ref = f"A1:I{max(1, row_index - 1)}"
+    for column, width in enumerate((10, 28, 48, 12, 34, 54, 14, 60, 32), 1):
+        outline.column_dimensions[get_column_letter(column)].width = width
+
+    draft_headers = (
+        "Division #", "Group", "Division title", "Purpose", "Target words",
+        "Draft words", "Chapter text",
+    )
+    write_row(drafts, 1, draft_headers, header=True)
+    row_index = 2
+    for part in plan.parts:
+        for chapter in part.chapters:
+            text = chapters.get(chapter.index, {}).get("text") or ""
+            write_row(drafts, row_index, (
+                chapter.index, part.title, chapter.title, chapter.purpose,
+                chapter.words, len(text.split()), text,
+            ))
+            row_index += 1
+    drafts.freeze_panes = "A2"
+    drafts.auto_filter.ref = f"A1:G{max(1, row_index - 1)}"
+    for column, width in enumerate((12, 28, 36, 54, 14, 14, 110), 1):
+        drafts.column_dimensions[get_column_letter(column)].width = width
+
+    for sheet in workbook.worksheets:
+        sheet.sheet_view.showGridLines = False
+        sheet.sheet_properties.pageSetUpPr.fitToPage = True
+        sheet.page_setup.fitToWidth = 1
+        sheet.page_setup.fitToHeight = 0
+        sheet.page_setup.orientation = "landscape"
+        if sheet in (outline, drafts):
+            sheet.print_title_rows = "1:1"
+        sheet.sheet_view.zoomScale = 85
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = body_alignment
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
 def export(
     plan: Plan,
     chapters: dict[int, dict],
@@ -1181,4 +1555,16 @@ def export(
         return to_epub(plan, chapters, options=options), f"{base}.epub", "application/epub+zip"
     if fmt == "pdf":
         return to_pdf(plan, chapters, options=options), f"{base}.pdf", "application/pdf"
+    if fmt == "docx":
+        return (
+            to_docx(plan, chapters, options=options),
+            f"{base}.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    if fmt == "xlsx":
+        return (
+            to_xlsx(plan, chapters, options=options),
+            f"{base}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
     raise ValueError(f"unknown format: {fmt}")

@@ -34,7 +34,7 @@ if [ ! -x ".venv/bin/python" ]; then
 fi
 
 # 3. Dependencies, installed once
-if ! .venv/bin/python -c "import fastapi, uvicorn, httpx, reportlab" >/dev/null 2>&1; then
+if ! .venv/bin/python -c "import fastapi, uvicorn, httpx, reportlab, docx, openpyxl" >/dev/null 2>&1; then
   echo "Installing dependencies, this takes a minute on first run…"
   .venv/bin/python -m pip install --upgrade pip >/dev/null
   .venv/bin/python -m pip install -r requirements-bookwright.txt
